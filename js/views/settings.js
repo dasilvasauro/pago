@@ -39,7 +39,7 @@ export function render(el) {
                 <button type="button" class="btn ghost" data-signout>Sair da conta</button>
               </div>`
             : `<p class="set-line">Dados guardados apenas neste dispositivo.</p>
-              <div class="set-actions">${sync.cloudConfigured() ? `<button type="button" class="btn primary" data-connect>${icon('cloud')}Conectar conta Google</button>` : `<span class="set-line muted">Para sincronizar e compartilhar, configure o Firebase (veja o README).</span>`}</div>`
+              <div class="set-actions">${sync.cloudConfigured() ? `<button type="button" class="btn primary" data-connect>${icon('cloud')}Conectar conta Google</button>` : `<span class="set-line ${sync.getConfigError() ? 'neg' : 'muted'}">${esc(sync.getConfigError() || 'Para sincronizar e compartilhar, configure o Firebase (veja o README).')}</span>`}</div>`
       }
     </div>
   </section>

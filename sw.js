@@ -1,5 +1,5 @@
 // Service worker do Pago: app disponível offline + lembretes periódicos.
-const VERSION = 'pago-v1.2.0';
+const VERSION = 'pago-v1.2.2';
 const SHELL = [
   './',
   'index.html',
@@ -59,7 +59,22 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  // App: cache primeiro, rede como reserva.
+  // Configuração do Firebase: rede primeiro (para valer assim que o arquivo for alterado), cache se offline.
+  if (url.origin === location.origin && url.pathname.endsWith('/js/firebase-config.js')) {
+    e.respondWith(
+      fetch(req, { cache: 'no-store' })
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone(); // clonar antes de entregar a resposta
+            caches.open(VERSION).then((c) => c.put('js/firebase-config.js', copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match('js/firebase-config.js')),
+    );
+    return;
+  }
+  // App: cache primeiro, rede como reserva. Uma nova VERSION renova tudo.
   if (url.origin === location.origin) {
     e.respondWith(
       caches.match(req, { ignoreSearch: true }).then((hit) => hit || fetch(req).catch(() => caches.match('index.html'))),

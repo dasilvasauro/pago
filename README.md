@@ -99,6 +99,8 @@ export const cloudConfig = {
 };
 ```
 
+Copie só os valores. O console também mostra as linhas `import { initializeApp } from "firebase/app"` e `const app = initializeApp(firebaseConfig)`; elas são para projetos com npm e quebram o Pago se forem coladas no arquivo. O Pago já carrega o Firebase sozinho.
+
 Esses valores não são secretos e podem ir para o GitHub. Quem protege os dados são as regras do Firestore e a criptografia feita no aparelho.
 
 ### 5. Publicar as regras e o índice
@@ -143,7 +145,7 @@ Todos os caminhos são relativos, então o app funciona em subpastas, por exempl
 
 ### Atualizações
 
-Ao publicar uma nova versão, aumente `VERSION` em `sw.js` e `app.version` em `js/main.js`. O app mostra "Nova versão disponível" e atualiza com um toque.
+Ao publicar uma nova versão, aumente `VERSION` em `sw.js` e `app.version` em `js/main.js`. O app guarda os arquivos para funcionar offline e só os renova quando `VERSION` muda. A exceção é `js/firebase-config.js`, que é sempre buscado na rede primeiro: alterar só a configuração não exige mudar a versão. O app mostra "Nova versão disponível" e atualiza com um toque.
 
 ---
 

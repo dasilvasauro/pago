@@ -13,7 +13,6 @@
 // Tombstones: apagados do servidor apenas quando todos os membros ativos já sincronizaram
 // depois da exclusão (estabilidade causal) e passaram 30 dias. Uma réplica que ficou fora
 // além desse horizonte faz uma reconciliação completa ao voltar.
-import { cloudConfig } from '../firebase-config.js';
 import * as store from './store.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1';
@@ -32,6 +31,22 @@ let status = 'local';
 let lastPresence = 0;
 const listeners = new Set();
 
+let cloudConfig = null;
+let configError = '';
+
+// A configuração é carregada à parte: um erro em firebase-config.js não pode derrubar o app inteiro.
+export async function loadConfig() {
+  try {
+    const m = await import('../firebase-config.js');
+    cloudConfig = m.cloudConfig || m.firebaseConfig || m.default || null;
+    if (!cloudConfig) configError = 'O arquivo js/firebase-config.js precisa exportar "cloudConfig".';
+  } catch (e) {
+    configError = /module specifier|firebase\//i.test(String(e?.message))
+      ? 'O arquivo js/firebase-config.js tem linhas de import (como "firebase/app"). Ele deve conter só o objeto de configuração; veja o README.'
+      : `O arquivo js/firebase-config.js tem um erro: ${e?.message || e}`;
+  }
+}
+export const getConfigError = () => configError;
 export const cloudConfigured = () => !!(cloudConfig && cloudConfig.apiKey && !/^COLE/.test(cloudConfig.apiKey));
 export const onStatus = (f) => (listeners.add(f), f(status), () => listeners.delete(f));
 export const getStatus = () => status;

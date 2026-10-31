@@ -20,7 +20,7 @@ import * as wallet from './views/wallet.js';
 import * as settings from './views/settings.js';
 import { app } from './state.js';
 
-app.version = '1.2.0';
+app.version = '1.2.2';
 const VIEWS = { inicio: dashboard, diario: diary, planejar: plan, carteira: wallet, ajustes: settings };
 const NAV = [
   ['inicio', 'Início', 'home'],
@@ -41,6 +41,7 @@ async function boot() {
   app.test = localStorage.getItem('pago.test') === '1';
   initClock(app.test);
   document.documentElement.classList.toggle('is-test', app.test);
+  await sync.loadConfig();
   const idb = await openDB(app.test ? 'pago-test' : 'pago');
   app.idb = idb;
   let device = await idb.get('meta', 'device');

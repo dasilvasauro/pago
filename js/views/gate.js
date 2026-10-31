@@ -42,7 +42,7 @@ export function welcome() {
         ${sync.cloudConfigured() ? `<button type="button" class="btn primary wide" data-google>${googleIcon()}Entrar com Google</button>` : ''}
         <button type="button" class="btn ${sync.cloudConfigured() ? 'ghost' : 'primary'} wide" data-local>Usar só neste dispositivo</button>
       </div>
-      <p class="gate-err" hidden></p>
+      <p class="gate-err"${sync.getConfigError() ? '' : ' hidden'}>${esc(sync.getConfigError())}</p>
       <button type="button" class="gate-link" data-test>${icon('flask')}Experimentar no modo de teste</button>`);
     h.querySelector('[data-local]').onclick = () => createLocal().then(resolve);
     h.querySelector('[data-test]').onclick = () => {
