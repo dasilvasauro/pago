@@ -123,9 +123,14 @@ Também dá para fazer sem o CLI:
 
 - **Primeiro aparelho:** escolha **Entrar com Google** e depois **Criar um espaço**. Defina a senha do espaço.
 - **Outra pessoa entrar:**
-  1. Em **Ajustes**, toque em **Convidar pessoa** e envie o código.
-  2. A pessoa entra com a conta Google dela, escolhe **Entrar com convite** e informa o código e a senha do espaço.
-  3. Combine a senha por outro canal.
+  1. Em **Ajustes**, toque em **Convidar pessoa**. Aparece um QR Code, o código e o botão Compartilhar link.
+  2. A pessoa entra por um destes caminhos:
+     - **Câmera comum do celular:** aponta para o QR, e o Pago abre já com o convite;
+     - **Leitor do app:** em **Entrar com convite**, toca em **Ler QR Code**;
+     - **Link:** recebe o link por mensagem e abre.
+  3. A pessoa entra com a conta Google dela e informa a senha do espaço. A senha nunca vai no QR nem no link: combine por outro canal.
+  4. Depois que ela entrar, gere um novo código (isso invalida o QR anterior; quem já entrou continua no espaço).
+- **No iPhone:** o QR lido pela câmera abre no Safari. Se a pessoa usa o Pago instalado na tela de início, basta entrar de novo com a mesma conta Google dentro do app instalado.
 - **Começou no modo "só neste dispositivo"?** Em **Ajustes**, use **Conectar conta Google**. Os dados locais sobem para a nuvem.
 
 ---
@@ -267,3 +272,10 @@ Excluir o acordo desfaz tudo isso.
 - A barra no topo permite avançar +1, +7 ou +30 dias.
 - Com **Simular uso** marcado, o app gera gastos aleatórios e quita a maior parte dos compromissos de cada dia que passou, e então mostra o resumo do período.
 - **Hoje real** volta para a data atual. **Recomeçar dados de teste** gera tudo de novo.
+
+## Licenças de terceiros
+
+- `js/vendor/qrcode.js`: QR Code Generator for JavaScript, de Kazuhiko Arase, sob licença MIT.
+- `js/vendor/jsqr.js`: jsQR, de Cosmo Wolfe, sob licença Apache 2.0. É usado para ler QR Code quando o navegador não tem leitor nativo.
+
+"QR Code" é marca registrada da DENSO WAVE INCORPORATED.

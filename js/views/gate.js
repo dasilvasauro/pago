@@ -3,6 +3,9 @@ import * as sync from '../core/sync.js';
 import { createKey, unlockKey } from '../lib/crypto.js';
 import { uid, esc } from '../lib/util.js';
 import { icon } from '../ui/ui.js';
+import { scanQR, parseInvite } from '../ui/qr.js';
+
+const pendingInvite = () => sessionStorage.getItem('pago.invite') || '';
 
 const LOGO = `<svg class="gate-logo" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="gl" x1="0" x2="1"><stop offset="0" stop-color="var(--g1)"/><stop offset="1" stop-color="var(--g2)"/></linearGradient><filter id="gf"><feGaussianBlur stdDeviation="2.4"/></filter></defs><rect width="64" height="64" rx="15" fill="var(--surface-2)"/><path d="M14 41 24 36l7.5 3.3 8.5-11.3 10-5.5" fill="none" stroke="url(#gl)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" filter="url(#gf)" opacity=".8"/><path d="M14 41 24 36l7.5 3.3 8.5-11.3 10-5.5" fill="none" stroke="url(#gl)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
@@ -37,7 +40,7 @@ const passFields = (confirm) => `
 export function welcome() {
   return new Promise((resolve) => {
     const h = screen(`
-      <p class="gate-lead">Controle de gastos, contas e dívidas, registrado por você, dia a dia.</p>
+      <p class="gate-lead">${pendingInvite() ? 'Você recebeu um convite para um espaço do Pago. Entre com a sua conta Google para continuar.' : 'Controle de gastos, contas e dívidas, registrado por você, dia a dia.'}</p>
       <div class="gate-actions">
         ${sync.cloudConfigured() ? `<button type="button" class="btn primary wide" data-google>${googleIcon()}Entrar com Google</button>` : ''}
         <button type="button" class="btn ${sync.cloudConfigured() ? 'ghost' : 'primary'} wide" data-local>Usar só neste dispositivo</button>
@@ -70,6 +73,7 @@ export async function afterGoogle(user) {
 }
 
 function chooseCloud(user) {
+  if (pendingInvite()) return joinCloud(user);
   return new Promise((resolve) => {
     const h = screen(`
       <p class="gate-lead">Olá, ${esc(user.displayName?.split(' ')[0] || '')}. Você ainda não participa de nenhum espaço.</p>
@@ -121,17 +125,33 @@ function createCloud(user) {
 
 function joinCloud(user) {
   let joined = null;
-  return formScreen(
-    'Informe o código de convite e a senha do espaço que recebeu.',
-    `<label class="field"><span>Código de convite</span><input name="code" required autocomplete="off" spellcheck="false"></label>${passFields(false)}`,
+  const pre = pendingInvite();
+  const p = formScreen(
+    pre ? 'Convite recebido. Informe a senha do espaço, combinada com quem convidou você.' : 'Leia o QR Code ou digite o código de convite, e informe a senha do espaço.',
+    `<div class="field"><span>Código de convite</span><div class="code-in"><input name="code" value="${esc(pre)}" required autocomplete="off" spellcheck="false" aria-label="Código de convite"><button type="button" class="btn" data-scan>${icon('qr')}Ler QR Code</button></div></div>${passFields(false)}`,
     'Entrar no espaço',
     async (f) => {
-      joined ||= await sync.joinHousehold(f.code.value, user.uid);
+      const code = parseInvite(f.code.value) || f.code.value.trim();
+      if (joined && joined.code !== code) joined = null;
+      joined ||= { ...(await sync.joinHousehold(code, user.uid)), code };
+      sessionStorage.removeItem('pago.invite');
       const key = await unlockKey(f.p1.value, joined.wrap);
       return { hid: joined.hid, key, wrap: joined.wrap, mode: 'cloud', uid: user.uid, owner: joined.owner, user, fresh: false };
     },
-    () => chooseCloud(user),
+    () => {
+      sessionStorage.removeItem('pago.invite');
+      return chooseCloud(user);
+    },
   );
+  const scan = host.querySelector('[data-scan]');
+  scan.onclick = async () => {
+    const text = await scanQR();
+    if (!text) return;
+    host.querySelector('input[name=code]').value = parseInvite(text);
+    host.querySelector('input[name=p1]').focus();
+  };
+  if (pre) setTimeout(() => host.querySelector('input[name=p1]')?.focus(), 50);
+  return p;
 }
 
 async function unlockCloud(user, hid) {

@@ -6,6 +6,7 @@ import { today } from '../lib/clock.js';
 import { esc, ymOf, addMonths, fmtMonth } from '../lib/util.js';
 import { icon, tip, sheet, opt, seg, toast, confirmDialog, colorPicker, COLORS } from '../ui/ui.js';
 import { app, memberMap } from '../state.js';
+import { qrSvg, inviteLink } from '../ui/qr.js';
 
 export const title = 'Ajustes';
 let reportMonth = null;
@@ -228,22 +229,44 @@ async function invite() {
     return toast('Sem conexão. Tente de novo online.');
   }
   const code = () => `${app.hid}.${h.joinCode}`;
+  const drawQR = async (el) => {
+    el.querySelector('[data-qr]').innerHTML = await qrSvg(inviteLink(code()));
+  };
   sheet({
     title: 'Convidar pessoa',
     body: `<div class="form">
-      <p class="sheet-text">Envie o código abaixo. A pessoa entra com a conta Google dela, escolhe Entrar com convite e informa o código e a senha do espaço. Combine a senha pessoalmente ou por outro canal.</p>
-      <div class="code-box"><code data-code>${esc(code())}</code><button type="button" class="icon-btn" data-copy aria-label="Copiar">${icon('copy')}</button></div>
-      <div class="sheet-actions"><button type="button" class="btn ghost" data-rotate>${icon('refresh')}Gerar novo código</button><span></span></div>
-      <p class="form-meta">Gerar um novo código invalida o anterior. Quem já entrou continua no espaço.</p>
+      <p class="sheet-text">A pessoa aponta a câmera do celular para o QR Code, ou usa Ler QR Code dentro do Pago, e entra com a conta Google dela. A senha do espaço não vai no QR: combine pessoalmente ou por outro canal.</p>
+      <div class="qr-card" data-qr aria-label="QR Code do convite" role="img"></div>
+      <div class="code-box"><code data-code>${esc(code())}</code><button type="button" class="icon-btn" data-copy aria-label="Copiar código">${icon('copy')}</button></div>
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" data-rotate>${icon('refresh')}Gerar novo código</button>
+        <button type="button" class="btn" data-share>${icon('share')}${navigator.share ? 'Compartilhar link' : 'Copiar link'}</button>
+      </div>
+      <p class="form-meta">Gerar um novo código invalida o anterior, inclusive o QR. Quem já entrou continua no espaço. Depois que a pessoa entrar, vale gerar um novo.</p>
     </div>`,
     onMount(el) {
+      drawQR(el);
       el.querySelector('[data-copy]').onclick = async () => {
         await navigator.clipboard.writeText(code());
         toast('Código copiado');
       };
+      el.querySelector('[data-share]').onclick = async () => {
+        const url = inviteLink(code());
+        if (navigator.share) {
+          try {
+            await navigator.share({ title: 'Convite para o Pago', text: 'Entre no nosso espaço do Pago. A senha eu passo por outro canal.', url });
+          } catch {
+            /* compartilhamento cancelado */
+          }
+        } else {
+          await navigator.clipboard.writeText(url);
+          toast('Link copiado');
+        }
+      };
       el.querySelector('[data-rotate]').onclick = async () => {
         h.joinCode = await sync.rotateInvite(app.hid);
         el.querySelector('[data-code]').textContent = code();
+        await drawQR(el);
         toast('Novo código gerado');
       };
     },

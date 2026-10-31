@@ -20,7 +20,7 @@ import * as wallet from './views/wallet.js';
 import * as settings from './views/settings.js';
 import { app } from './state.js';
 
-app.version = '1.3.0';
+app.version = '1.4.0';
 const VIEWS = { inicio: dashboard, diario: diary, planejar: plan, carteira: wallet, ajustes: settings };
 const NAV = [
   ['inicio', 'Início', 'home'],
@@ -35,6 +35,12 @@ let rendered = '';
 
 async function boot() {
   initTips();
+  // Convite aberto por link ou pela câmera do celular: guarda e limpa o endereço.
+  const inv = location.hash.match(/^#convite=([^&]+)/);
+  if (inv) {
+    sessionStorage.setItem('pago.invite', decodeURIComponent(inv[1]));
+    history.replaceState(null, '', location.pathname + location.search);
+  }
   applyTheme(localStorage.getItem('pago.theme') || 'system');
   if (!window.isSecureContext || !crypto.subtle) throw new Error('o Pago precisa ser aberto por HTTPS ou por localhost. Endereços como http://192.168… não liberam a criptografia do navegador. Veja as opções no README, em "Rodar localmente".');
   registerSW();
@@ -53,6 +59,10 @@ async function boot() {
   let hid = await idb.get('meta', 'hid');
   let key = null;
   let fresh = false;
+  if (hid && sessionStorage.getItem('pago.invite')) {
+    sessionStorage.removeItem('pago.invite');
+    setTimeout(() => toast('Este aparelho já está em um espaço. Para entrar em outro, saia da conta em Ajustes e abra o convite de novo.', { ms: 6000 }), 1500);
+  }
 
   if (!hid) {
     // Volta de um login por redirecionamento?
