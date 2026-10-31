@@ -1,4 +1,4 @@
-const firebaseConfig = {
+const cloudConfig = {
   apiKey: "AIzaSyCsAijvhbYJiQTb5SbBIbeMu75ITve3dNA",
   authDomain: "pago-1124d.firebaseapp.com",
   projectId: "pago-1124d",
