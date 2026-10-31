@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1B2029"/>
+      <stop offset="1" stop-color="#0C0F14"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.74" cy="0.36" r="0.55">
+      <stop offset="0" stop-color="#5FE3B5" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#5FE3B5" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ln" x1="104" y1="0" x2="408" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7C8CFF"/>
+      <stop offset="1" stop-color="#5FE3B5"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-50%" width="140%" height="200%">
+      <feGaussianBlur stdDeviation="20"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="114" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="114" fill="url(#halo)"/>
+  <path d="M112 334 L188 294 L248 320 L316 230 L400 184" fill="none" stroke="url(#ln)" stroke-width="44" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" opacity=".9"/>
+  <path d="M112 334 L188 294 L248 320 L316 230 L400 184" fill="none" stroke="url(#ln)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

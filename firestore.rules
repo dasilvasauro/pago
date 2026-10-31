@@ -1,0 +1,61 @@
+rules_version = '2';
+
+// Regras do Pago.
+// - Só membros de um espaço leem ou escrevem nele.
+// - Para entrar, a pessoa precisa apresentar o código de convite atual do espaço.
+// - Registros só aceitam versões mais novas (u maior que a gravada): uma escrita atrasada
+//   nunca sobrescreve uma recente.
+// - O conteúdo dos registros é sempre cifrado no aparelho; o servidor só vê metadados.
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function household(hid) { return get(/databases/$(db)/documents/households/$(hid)); }
+    function isMember(hid) {
+      return signedIn() && exists(/databases/$(db)/documents/households/$(hid)/members/$(me()));
+    }
+
+    match /users/{uid} {
+      allow read, write: if signedIn() && me() == uid;
+    }
+
+    match /households/{hid} {
+      allow create: if signedIn()
+        && request.resource.data.owner == me()
+        && request.resource.data.joinCode is string
+        && request.resource.data.joinCode.size() >= 8;
+      allow read: if isMember(hid);
+      // Só o dono altera o espaço (novo código de convite, nova senha); o dono não muda.
+      allow update: if isMember(hid)
+        && resource.data.owner == me()
+        && request.resource.data.owner == resource.data.owner;
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if isMember(hid);
+        allow create: if signedIn() && me() == uid
+          && request.resource.data.code == household(hid).data.joinCode;
+        allow update: if signedIn() && me() == uid
+          && request.resource.data.code == resource.data.code;
+        allow delete: if signedIn() && (me() == uid || household(hid).data.owner == me());
+      }
+
+      match /records/{rid} {
+        function valid() {
+          let d = request.resource.data;
+          return d.keys().hasOnly(['u', 'by', 'del', 'iv', 'ct', 'ts'])
+            && d.u is string && d.u.size() < 64
+            && d.by == me()
+            && d.del is bool
+            && d.iv is bytes && d.ct is bytes && d.ct.size() < 1000000
+            && d.ts == request.time;
+        }
+        allow read: if isMember(hid);
+        allow create: if isMember(hid) && valid();
+        allow update: if isMember(hid) && valid() && request.resource.data.u > resource.data.u;
+        allow delete: if isMember(hid) && resource.data.del == true;
+      }
+    }
+  }
+}

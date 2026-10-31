@@ -1,0 +1,12 @@
+// Cole aqui a configuração do seu app Web do Firebase
+// (Console do Firebase > Configurações do projeto > Seus apps > SDK setup and configuration > Config).
+// Enquanto apiKey começar com "COLE", o Pago funciona apenas neste dispositivo.
+// Esses valores não são segredos: quem protege os dados são as regras do Firestore e a criptografia.
+export const cloudConfig = {
+  apiKey: 'COLE_SUA_API_KEY',
+  authDomain: 'seu-projeto.firebaseapp.com',
+  projectId: 'seu-projeto',
+  storageBucket: 'seu-projeto.appspot.com',
+  messagingSenderId: '000000000000',
+  appId: '1:000000000000:web:0000000000000000',
+};
