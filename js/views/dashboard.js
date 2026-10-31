@@ -45,7 +45,7 @@ export function render(el) {
             <button type="button" role="radio" aria-checked="${!isSaldo}" data-mode="divida" class="${!isSaldo ? 'on' : ''}">Dívida total</button>
             <button type="button" role="radio" aria-checked="${isSaldo}" data-mode="saldo" class="${isSaldo ? 'on' : ''}">Saldo total</button>
           </div>
-          ${tip(isSaldo ? 'Soma dos valores positivos nas contas correntes, poupanças e em dinheiro. Contas no negativo não entram aqui: elas aparecem como cheque especial na dívida. Vouchers e investimentos ficam à parte.' : 'Soma do cheque especial em uso, de tudo o que está nos cartões de crédito (inclusive parcelas futuras) e das parcelas restantes de acordos e parcelamentos. Atualiza a cada lançamento.')}
+          ${tip(isSaldo ? 'Soma dos valores positivos nas contas correntes, poupanças e em dinheiro. Contas no negativo não entram aqui: elas aparecem como cheque especial na dívida. Vouchers e investimentos ficam à parte.' : 'Soma do cheque especial em uso, de tudo o que está nos cartões de crédito (inclusive parcelas futuras), do que falta pagar em acordos e parcelamentos, das outras dívidas e das contas recorrentes em atraso. Atualiza a cada lançamento.')}
         </div>
         <p class="big" data-big>${money(value)}</p>
         <p class="delta ${delta === 0 ? '' : good ? 'good' : 'bad'}">${delta === 0 ? 'Sem variação' : `${delta < 0 ? 'Caiu' : 'Subiu'} ${money(Math.abs(delta))}`} nos últimos 30 dias</p>
@@ -59,7 +59,9 @@ export function render(el) {
         <div><dt>Investimentos</dt><dd>${money(pos.invested)}</dd></div>`
             : `<div><dt>Cheque especial</dt><dd>${money(pos.overdraft)}</dd></div>
         <div><dt>Cartões</dt><dd>${money(pos.cards)}</dd></div>
-        <div><dt>Acordos e parcelamentos</dt><dd>${money(pos.plans)}</dd></div>`
+        <div><dt>Acordos e parcelamentos</dt><dd>${money(pos.plans)}</dd></div>
+        ${pos.other ? `<div><dt>Outras dívidas</dt><dd>${money(pos.other)}</dd></div>` : ''}
+        ${pos.late ? `<div><dt>Contas em atraso ${tip('Contas recorrentes vencidas e ainda não pagas. Saem daqui ao registrar o pagamento ou ao renegociá-las em Planejar.')}</dt><dd class="neg">${money(pos.late)}</dd></div>` : ''}`
         }
         <div><dt>Patrimônio líquido ${tip('Tudo o que você tem (contas positivas, vouchers e investimentos) menos a dívida total.')}</dt><dd class="${pos.net < 0 ? 'neg' : 'pos'}">${money(pos.net)}</dd></div>
       </dl>
@@ -110,7 +112,7 @@ export function render(el) {
       <header class="panel-head"><h3>Contas e cartões</h3><a href="#carteira" class="link">Carteira</a></header>
       <ul class="mini-list">
         ${S.acct
-          .filter((a) => !a.archived && a.kind !== 'investimento')
+          .filter((a) => !a.archived && a.kind !== 'investimento' && a.kind !== 'divida')
           .map((a) => {
             const b = bal.get('a:' + a.id) || 0;
             const lim = a.overdraftLimit || 0;

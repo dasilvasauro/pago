@@ -1,5 +1,5 @@
 import * as store from '../core/store.js';
-import { obligations, dueAmount, planStatus, paidKeys, PLAN_KINDS, planMonthOf } from '../core/domain.js';
+import { obligations, dueAmount, planStatus, paidKeys, PLAN_KINDS, planMonthOf, lateBills, balances, cardInfo, walletName } from '../core/domain.js';
 import { today } from '../lib/clock.js';
 import { esc, money, ymOf, addMonths, fmtMonth, fmtMonthShort, relDay, sum, fmtDay } from '../lib/util.js';
 import { icon, tip, sheet, moneyInput, readMoney, opt, seg, field, toast, confirmDialog } from '../ui/ui.js';
@@ -49,7 +49,7 @@ export function render(el) {
         ? `<ul class="ob-list">${obs
             .map((o) => {
               const late = !o.paid && o.date < td;
-              const state = o.paid ? `<span class="pill ok">${icon('check')}${o.dir === 'in' ? 'Recebido' : 'Pago'}</span>` : late ? `<span class="pill late">Atrasado</span>` : `<span class="pill">${relDay(o.date, td)}</span>`;
+              const state = o.reneg ? `<span class="pill">${icon('swap')}Renegociada</span>` : o.paid ? `<span class="pill ok">${icon('check')}${o.dir === 'in' ? 'Recebido' : 'Pago'}</span>` : late ? `<span class="pill late">Atrasado</span>` : `<span class="pill">${relDay(o.date, td)}</span>`;
               return `<li class="${o.paid ? 'done' : ''}">
                 <div class="ob-date"><b>${o.date.slice(8)}</b><span>${fmtDay(o.date).split(' ')[1]}</span></div>
                 <div class="ob-main"><b>${esc(o.title)}</b>
@@ -57,7 +57,7 @@ export function render(el) {
                   ${state}
                 </div>
                 <div class="ob-side"><span class="amt ${o.dir === 'in' ? 'pos' : ''}">${money(o.kind === 'invoice' && !o.paid ? o.remaining : o.amount)}</span>
-                  <button type="button" class="btn small ${o.paid ? 'ghost' : ''}" data-ob="${esc(o.id)}">${o.paid ? 'Ver' : o.dir === 'in' ? 'Receber' : 'Pagar'}</button></div>
+                  ${o.reneg ? '' : `<button type="button" class="btn small ${o.paid ? 'ghost' : ''}" data-ob="${esc(o.id)}">${o.paid ? 'Ver' : o.dir === 'in' ? 'Receber' : 'Pagar'}</button>`}</div>
               </li>`;
             })
             .join('')}</ul>`
@@ -82,14 +82,14 @@ export function render(el) {
     </section>
 
     <section class="block">
-      <header class="block-head"><h3>Parcelamentos e acordos</h3>${tip('Renegociações, empréstimos, financiamentos e contas parceladas (como um débito de gás em 5x). As parcelas restantes entram na dívida total. Vincule a uma conta recorrente para que a parcela venha somada ao valor mensal.')}<button type="button" class="btn small" data-new-plan>${icon('plus')}Novo</button></header>
+      <header class="block-head"><h3>Parcelamentos e acordos</h3>${tip('Renegociações, empréstimos, financiamentos e contas parceladas (como um débito de gás em 5x). As parcelas restantes entram na dívida total. Vincule a uma conta recorrente para que a parcela venha somada ao valor mensal. Para transformar contas atrasadas, cheque especial ou cartão em um acordo, use Renegociar.')}<div class="head-actions"><button type="button" class="btn small ghost" data-reneg>${icon('swap')}Renegociar</button><button type="button" class="btn small" data-new-plan>${icon('plus')}Novo</button></div></header>
       ${
         S.plan.length
           ? `<ul class="rows">${S.plan
               .map((p) => {
                 const st = planStatus(p, paid);
                 return `<li><button type="button" data-plan="${p.id}" class="row-btn">
-                  <span class="row-main"><b>${esc(p.name)}</b><span>${st.paid}/${p.n} pagas, restam ${money(st.remaining)}${st.remainingN ? `, termina em ${fmtMonthShort(planMonthOf(p, p.n))}` : ''}</span>
+                  <span class="row-main"><b>${esc(p.name)}</b><span>${p.down ? (st.downOpen ? 'Entrada pendente, ' : 'Entrada paga, ') : ''}${st.paid}/${p.n} pagas, restam ${money(st.remaining)}${st.remainingN ? `, termina em ${fmtMonthShort(planMonthOf(p, p.n))}` : ''}</span>
                   <span class="bar thin"><i style="width:${(st.paid / p.n) * 100}%"></i></span></span>
                   <span class="amt">${money(p.amount)}<small>por mês</small></span></button></li>`;
               })
@@ -109,6 +109,7 @@ export function render(el) {
   el.querySelectorAll('[data-ob]').forEach((b) => b.addEventListener('click', () => openPay(byId.get(b.dataset.ob))));
   el.querySelector('[data-new-bill]').addEventListener('click', () => openBill());
   el.querySelector('[data-new-plan]').addEventListener('click', () => openPlan());
+  el.querySelector('[data-reneg]').addEventListener('click', () => openRenegotiate());
   el.querySelectorAll('[data-bill]').forEach((b) => b.addEventListener('click', () => openBill(b.dataset.bill)));
   el.querySelectorAll('[data-plan]').forEach((b) => b.addEventListener('click', () => openPlan(b.dataset.plan)));
 }
@@ -182,34 +183,44 @@ export function openBill(id) {
   });
 }
 
-export function openPlan(id) {
+// extra (opcional): { sources, original, name } vindo de Renegociar.
+export function openPlan(id, extra = null) {
   const S = store.snapshot();
   const td = today();
-  const p = id ? S.byId.get(id) : { kind: 'acordo', amount: 0, n: 12, paidBefore: 0, startMonth: addMonths(ymOf(td), 0), day: 10 };
+  const p = id
+    ? S.byId.get(id)
+    : { kind: 'acordo', amount: 0, n: 12, paidBefore: 0, startMonth: addMonths(ymOf(td), extra ? 1 : 0), day: 10, down: 0, downDate: td, name: extra?.name || '' };
+  const covered = (p.covers || []).length;
   sheet({
-    title: id ? 'Editar parcelamento' : 'Novo parcelamento ou acordo',
+    title: id ? 'Editar parcelamento' : extra ? 'Condições do acordo' : 'Novo parcelamento ou acordo',
     body: `<form class="form" data-f>
-      <label class="field"><span>Nome</span><input name="name" value="${esc(p.name || '')}" required maxlength="50" placeholder="Ex.: Acordo cartão"></label>
+      ${extra ? `<div class="reneg-box"><span>Renegociando</span><b>${money(extra.original)}</b><small>${esc(extra.sources.map((x) => x.label).join(', '))}</small></div>` : ''}
+      ${p.origin ? `<p class="form-meta">Acordo que renegociou ${money(p.origin)}${covered ? ` (${covered} ${covered === 1 ? 'conta atrasada' : 'contas atrasadas'})` : ''}.</p>` : ''}
+      <label class="field"><span>Nome</span><input name="name" value="${esc(p.name || '')}" required maxlength="50" placeholder="Ex.: Acordo conta de luz"></label>
       <div class="grid2">
         ${field('Tipo', `<select name="kind">${Object.entries(PLAN_KINDS).map(([k, l]) => opt(k, l, k === p.kind)).join('')}</select>`)}
         ${field('Instituição', `<select name="institutionId"><option value="">Nenhuma</option>${S.inst.map((i) => opt(i.id, i.name, i.id === p.institutionId)).join('')}</select>`)}
       </div>
-      <span class="field-label">Valor da parcela</span>
+      <div class="grid2">
+        <div><span class="field-label">Entrada ${tip('Valor pago de início, se o acordo tiver. Fica como um compromisso próprio na data informada. Deixe zero se não houver.')}</span>${moneyInput('down', p.down || 0)}</div>
+        ${field('Data da entrada', `<input name="downDate" type="date" value="${p.downDate || td}">`)}
+      </div>
+      <span class="field-label">Valor de cada parcela</span>
       ${moneyInput('amount', p.amount, { big: true })}
       <div class="grid3">
-        <label class="field"><span>Total de parcelas</span><input name="n" type="number" min="1" max="600" value="${p.n}" required inputmode="numeric"></label>
+        <label class="field"><span>Parcelas</span><input name="n" type="number" min="1" max="600" value="${p.n}" required inputmode="numeric"></label>
         <label class="field"><span>Já pagas</span><input name="paidBefore" type="number" min="0" value="${p.paidBefore || 0}" required inputmode="numeric"></label>
         <label class="field"><span>Dia</span><input name="day" type="number" min="1" max="31" value="${p.day}" required inputmode="numeric"></label>
       </div>
-      ${field('Próxima parcela em', `<input name="startMonth" type="month" value="${p.startMonth}" required>`, 'Mês da primeira parcela que ainda não foi paga quando você cadastrou.')}
-      ${field('Somar a uma conta recorrente', `<select name="billId"><option value="">Não, cobrança separada</option>${S.bill.filter((b) => b.dir !== 'in').map((b) => opt(b.id, b.name, b.id === p.billId)).join('')}</select>`, 'Use quando a parcela vem junto com a conta do mês, como um débito de gás parcelado na própria fatura do gás.')}
+      ${field(extra ? 'Primeira parcela em' : 'Próxima parcela em', `<input name="startMonth" type="month" value="${p.startMonth}" required>`, 'Mês da primeira parcela ainda não paga. A entrada não conta como parcela.')}
+      ${field('Somar a uma conta recorrente', `<select name="billId"><option value="">Não, cobrança separada</option>${S.bill.filter((b) => b.dir !== 'in').map((b) => opt(b.id, b.name, b.id === p.billId)).join('')}</select>`, 'Use quando a parcela vem junto com a conta do mês, como um acordo de luz cobrado na própria fatura de luz.')}
       <div class="grid2">
         ${field('Paga com', `<select name="w">${walletOptions(S, 'out', encodeWallet(p.source, p.sourceVia))}</select>`)}
-        ${field('Categoria', `<select name="categoryId">${catOpts(S, 'saida', p.categoryId)}</select>`)}
+        ${field('Categoria', `<select name="categoryId">${catOpts(S, 'saida', p.categoryId || S.cat.find((c) => c.kind === 'saida' && c.name === 'Dívidas e acordos')?.id)}</select>`)}
       </div>
       ${methodSelect(p.method)}
       <p class="form-meta" data-calc></p>
-      <div class="sheet-actions">${id ? `<button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Excluir</button>` : '<span></span>'}<button class="btn primary">Salvar</button></div>
+      <div class="sheet-actions">${id ? `<button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Excluir</button>` : '<span></span>'}<button class="btn primary">${extra ? 'Criar acordo' : 'Salvar'}</button></div>
     </form>`,
     onMount(el, close) {
       const f = el.querySelector('[data-f]');
@@ -217,24 +228,45 @@ export function openPlan(id) {
         const n = Number(f.n.value) || 0;
         const k = Number(f.paidBefore.value) || 0;
         const a = Math.abs(readMoney(f.amount));
+        const down = Math.abs(readMoney(f.down));
         const rest = Math.max(0, n - k);
-        el.querySelector('[data-calc]').textContent = rest && a && f.startMonth.value ? `Restam ${rest} parcelas, ${money(rest * a)} no total. Última em ${fmtMonthShort(addMonths(f.startMonth.value, rest - 1))}.` : '';
+        const total = rest * a + down;
+        let txt = rest && a && f.startMonth.value ? `${down ? `Entrada de ${money(down)} + ` : ''}${rest} ${rest === 1 ? 'parcela' : 'parcelas'} de ${money(a)}: ${money(total)} no total. Última em ${fmtMonthShort(addMonths(f.startMonth.value, rest - 1))}.` : '';
+        const orig = extra?.original ?? p.origin;
+        if (txt && orig) {
+          const diff = total - orig;
+          txt += diff > 0 ? ` São ${money(diff)} a mais que o valor original (juros e encargos).` : diff < 0 ? ` Desconto de ${money(-diff)} sobre o valor original.` : ' Sem juros sobre o valor original.';
+        }
+        el.querySelector('[data-calc]').textContent = txt;
       };
       ['n', 'paidBefore', 'startMonth'].forEach((k) => f[k].addEventListener('input', calc));
       f.amount.addEventListener('money', calc);
+      f.down.addEventListener('money', calc);
       calc();
       el.querySelector('[data-del]')?.addEventListener('click', async () => {
-        if (!(await confirmDialog('Excluir este parcelamento? Ele deixa de contar na dívida. Pagamentos já registrados continuam no diário.', { ok: 'Excluir', danger: true }))) return;
+        const S2 = store.snapshot();
+        const linked = S2.tx.filter((t) => t.planId === id && t.type === 'ajuste');
+        const msg = linked.length || p.covers?.length
+          ? 'Excluir este acordo? Os saldos e contas que ele renegociou voltam a aparecer como estavam. Pagamentos já registrados continuam no diário.'
+          : 'Excluir este parcelamento? Ele deixa de contar na dívida. Pagamentos já registrados continuam no diário.';
+        if (!(await confirmDialog(msg, { ok: 'Excluir', danger: true }))) return;
+        for (const t of linked) {
+          await store.remove(t.id);
+          const acc = t.to?.k === 'a' ? S2.byId.get(t.to.id) : null;
+          if (acc?.kind === 'divida' && acc.archived) await store.save('acct', { ...acc, archived: false }, acc.id);
+        }
         await store.remove(id);
         close();
-        toast('Parcelamento excluído');
+        toast('Excluído');
       });
       f.onsubmit = async (e) => {
         e.preventDefault();
         const n = Number(f.n.value);
         const k = Number(f.paidBefore.value);
         if (k > n) return toast('Parcelas pagas não podem passar do total.');
-        const w = decodeWallet(store.snapshot(), f.w.value);
+        const S2 = store.snapshot();
+        const w = decodeWallet(S2, f.w.value);
+        const down = Math.abs(readMoney(f.down));
         const data = {
           name: f.name.value.trim(),
           kind: f.kind.value,
@@ -244,17 +276,99 @@ export function openPlan(id) {
           paidBefore: k,
           day: Math.min(31, Math.max(1, Number(f.day.value))),
           startMonth: f.startMonth.value,
+          down,
+          downDate: down ? f.downDate.value || td : '',
           billId: f.billId.value,
           categoryId: f.categoryId.value,
           source: w.ref,
           sourceVia: w.via || '',
           method: f.method.value,
           openingDate: p.openingDate || td,
+          covers: p.covers || [],
+          origin: p.origin || 0,
         };
         if (!data.amount) return toast('Informe o valor da parcela.');
-        await store.save('plan', data, id);
+        if (extra) {
+          data.covers = extra.sources.filter((x) => x.type === 'ob').map((x) => x.key);
+          data.origin = extra.original;
+        }
+        const pid = await store.save('plan', data, id);
+        if (extra) {
+          // Saldos renegociados saem de onde estavam: o acordo passa a representar essa dívida.
+          for (const x of extra.sources) {
+            const desc = `Renegociado em ${data.name}`;
+            if (x.type === 'acct') {
+              await store.save('tx', { type: 'ajuste', amount: x.amount, date: data.openingDate, to: { k: 'a', id: x.id }, desc, planId: pid });
+              const acc = S2.byId.get(x.id);
+              if (acc?.kind === 'divida') await store.save('acct', { ...acc, archived: true }, acc.id);
+            } else if (x.type === 'card') {
+              await store.save('tx', { type: 'ajuste', amount: -x.amount, date: data.openingDate, to: { k: 'c', id: x.id }, desc, planId: pid });
+            }
+          }
+        }
         close();
-        toast('Parcelamento salvo');
+        toast(extra ? 'Acordo criado' : 'Parcelamento salvo');
+      };
+    },
+  });
+}
+
+/* ---------- Renegociar ----------
+   Junta o que está sendo renegociado (contas atrasadas, saldo negativo, fatura, dívida avulsa ou um
+   valor informado) e abre as condições do acordo. Ao criar o acordo:
+   - contas atrasadas ficam marcadas como renegociadas (deixam de contar como atraso);
+   - saldos de contas, cartões e dívidas avulsas são zerados por um ajuste ligado ao acordo;
+   - a dívida total passa a ser a do acordo; a diferença aparece como juros ou desconto. */
+export function openRenegotiate(pre = {}) {
+  const S = store.snapshot();
+  const td = today();
+  const bal = balances(S, td);
+  const late = lateBills(S, td);
+  const accts = S.acct.filter((a) => !a.archived && (a.kind === 'corrente' || a.kind === 'poupanca' || a.kind === 'divida') && (bal.get('a:' + a.id) || 0) < 0);
+  const cards = S.card.filter((c) => c.kind === 'credito' && !c.archived && (bal.get('c:' + c.id) || 0) > 0);
+  const item = (type, id, label, sub, amount, checked) =>
+    `<label class="reneg-item"><input type="checkbox" data-src="${type}" data-id="${esc(id)}" data-amount="${amount}" data-label="${esc(label)}"${checked ? ' checked' : ''}><span><b>${esc(label)}</b><small>${esc(sub)}</small></span><em>${money(amount)}</em></label>`;
+  const lateHtml = late.map((x) => item('ob', x.key, `${x.bill.name} de ${fmtMonthShort(x.month)}`, `Venceu ${fmtDay(x.date)}`, x.amount, pre.keys?.includes(x.key))).join('');
+  const balHtml = [
+    ...accts.map((a) => item('acct', a.id, walletName(S, { k: 'a', id: a.id }), a.kind === 'divida' ? 'Dívida avulsa' : 'Saldo negativo (cheque especial)', -(bal.get('a:' + a.id) || 0), pre.acct === a.id)),
+    ...cards.map((c) => item('card', c.id, c.name, 'Tudo o que está no cartão, inclusive parcelas futuras', bal.get('c:' + c.id) || 0, pre.card === c.id)),
+  ].join('');
+  sheet({
+    title: 'Renegociar',
+    body: `<form class="form" data-f>
+      <p class="sheet-text">Marque o que entrou no acordo. Na próxima etapa você informa a entrada e as parcelas.</p>
+      ${late.length ? `<div class="field"><span>Contas em atraso</span><div class="reneg-list">${lateHtml}</div></div>` : ''}
+      ${balHtml ? `<div class="field"><span>Saldos devedores</span><div class="reneg-list">${balHtml}</div></div>` : ''}
+      <div class="field"><span>Outro valor ${tip('Para dívidas que não estão no Pago, como contas que atrasaram antes de você começar a usar o app. Ex.: quatro contas de luz antigas somando R$ 820.')}</span>
+        <input name="otherLabel" placeholder="Descrição (ex.: 4 contas de luz antigas)" maxlength="60">
+        ${moneyInput('other', 0)}
+      </div>
+      <div class="reneg-total"><span>Valor original</span><b data-total>${money(0)}</b></div>
+      <div class="sheet-actions"><span></span><button class="btn primary">Continuar</button></div>
+    </form>`,
+    onMount(el, close) {
+      const f = el.querySelector('[data-f]');
+      const collect = () => {
+        const list = [...el.querySelectorAll('[data-src]:checked')].map((c) => ({ type: c.dataset.src, id: c.dataset.id, key: c.dataset.id, amount: Number(c.dataset.amount), label: c.dataset.label }));
+        const other = Math.abs(readMoney(f.other));
+        if (other) list.push({ type: 'manual', amount: other, label: f.otherLabel.value.trim() || 'Outro valor' });
+        return list;
+      };
+      const total = () => {
+        el.querySelector('[data-total]').textContent = money(collect().reduce((a, x) => a + x.amount, 0));
+      };
+      el.querySelectorAll('[data-src]').forEach((c) => c.addEventListener('change', total));
+      f.other.addEventListener('money', total);
+      total();
+      f.onsubmit = (e) => {
+        e.preventDefault();
+        const sources = collect();
+        if (!sources.length) return toast('Marque ao menos um item ou informe um valor.');
+        const original = sources.reduce((a, x) => a + x.amount, 0);
+        const first = sources[0];
+        const name = first.type === 'ob' ? `Acordo ${first.label.split(' de ')[0].toLowerCase()}` : first.type === 'manual' ? 'Acordo' : `Acordo ${first.label}`;
+        close();
+        setTimeout(() => openPlan(null, { sources, original, name }), 240);
       };
     },
   });

@@ -27,6 +27,7 @@ export function walletOptions(S, mode, selected) {
     const items = [];
     for (const a of liveA.filter((a) => a.institutionId === inst.id)) {
       if (a.kind === 'investimento' && mode === 'out') continue;
+      if (a.kind === 'divida' && mode !== 'to' && mode !== 'from') continue;
       items.push([`a:${a.id}`, a.name]);
     }
     for (const c of liveC.filter((c) => c.institutionId === inst.id)) {
@@ -35,12 +36,14 @@ export function walletOptions(S, mode, selected) {
     }
     if (items.length) groups.push([inst.name, items]);
   }
-  const loose = liveA.filter((a) => !a.institutionId && a.kind !== 'voucher' && a.kind !== 'investimento');
+  const loose = liveA.filter((a) => !a.institutionId && !['voucher', 'investimento', 'divida'].includes(a.kind));
   if (loose.length) groups.push(['Outras contas', loose.map((a) => [`a:${a.id}`, a.name])]);
   const vouchers = liveA.filter((a) => !a.institutionId && a.kind === 'voucher');
   if (vouchers.length) groups.push(['Vouchers', vouchers.map((a) => [`a:${a.id}`, a.name])]);
   const inv = liveA.filter((a) => !a.institutionId && a.kind === 'investimento');
   if (inv.length && mode !== 'out') groups.push(['Investimentos', inv.map((a) => [`a:${a.id}`, a.name])]);
+  const debts = liveA.filter((a) => !a.institutionId && a.kind === 'divida');
+  if (debts.length && (mode === 'to' || mode === 'from')) groups.push(['Dívidas', debts.map((a) => [`a:${a.id}`, a.name])]);
   if (!groups.length) return `<option value="">Cadastre uma conta na Carteira</option>`;
   return (
     `<option value="" data-ph>Selecionar</option>` +
@@ -83,8 +86,8 @@ export function openTx(preset = {}) {
   let type = d.type === 'ajuste' ? 'ajuste' : d.type;
   let method = d.method || '';
   let contact = d.contact || '';
-  const fromV = t ? encodeWallet(t.from, t.via) : localStorage.getItem(LAST + 'from') || '';
-  const toV = t ? encodeWallet(t.to) : localStorage.getItem(LAST + 'to') || '';
+  const fromV = t ? encodeWallet(t.from, t.via) : preset.fromV || localStorage.getItem(LAST + 'from') || '';
+  const toV = t ? encodeWallet(t.to) : preset.toV || localStorage.getItem(LAST + 'to') || '';
 
   const metaLine = () => {
     if (!t) return '';

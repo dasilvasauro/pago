@@ -3,7 +3,8 @@ import { balances, cardInfo, position, obligations, ACCOUNT_KINDS, VOUCHER_KINDS
 import { today } from '../lib/clock.js';
 import { esc, money, fmtDay, fmtMonth, fmtDate } from '../lib/util.js';
 import { icon, tip, sheet, moneyInput, readMoney, opt, seg, field, toast, confirmDialog, colorPicker, COLORS, bindMoney } from '../ui/ui.js';
-import { txRow, openTx, openPay } from './txform.js';
+import { txRow, openTx, openPay, walletOptions } from './txform.js';
+import { openRenegotiate } from './plan.js';
 
 export const title = 'Carteira';
 
@@ -17,6 +18,12 @@ export function render(el) {
 
   const acctRow = (a) => {
     const b = bal.get('a:' + a.id) || 0;
+    if (a.kind === 'divida') {
+      const inst = a.institutionId ? S.byId.get(a.institutionId)?.name : '';
+      return `<li><button type="button" class="row-btn" data-acct="${a.id}"><span class="row-ic">${icon('bank')}</span>
+        <span class="row-main"><b>${esc(a.name)}</b><span>${b < 0 ? 'Saldo devedor' : 'Quitada'}${inst ? `, ${esc(inst)}` : ''}</span></span>
+        <span class="amt ${b < 0 ? 'neg' : ''}">${money(Math.max(0, -b))}</span></button></li>`;
+    }
     const lim = a.overdraftLimit || 0;
     const sub =
       a.kind === 'corrente' && lim
@@ -49,14 +56,16 @@ export function render(el) {
       <span class="amt ${info.outstanding > 0 ? 'neg' : ''}">${money(info.outstanding)}</span></button></li>`;
   };
 
-  const loose = accts.filter((a) => !a.institutionId && a.kind !== 'investimento');
+  const loose = accts.filter((a) => !a.institutionId && a.kind !== 'investimento' && a.kind !== 'divida');
   const inv = accts.filter((a) => a.kind === 'investimento');
+  const debts = accts.filter((a) => a.kind === 'divida');
 
   el.innerHTML = `
   <div class="kpis strip wrap5">
     <div><span>Disponível</span><b>${money(pos.liquid)}</b></div>
     <div><span>Cheque especial</span><b class="${pos.overdraft ? 'neg' : ''}">${money(pos.overdraft)}</b></div>
     <div><span>Cartões</span><b class="${pos.cards ? 'neg' : ''}">${money(pos.cards)}</b></div>
+    ${pos.other ? `<div><span>Outras dívidas</span><b class="neg">${money(pos.other)}</b></div>` : ''}
     <div><span>Vouchers</span><b>${money(pos.vouchers)}</b></div>
     <div><span>Investido</span><b>${money(pos.invested)}</b></div>
   </div>
@@ -66,7 +75,7 @@ export function render(el) {
     ${S.inst.length ? '' : `<p class="empty">Cadastre seu primeiro banco para adicionar contas e cartões.</p>`}
     ${S.inst
       .map((i) => {
-        const ia = accts.filter((a) => a.institutionId === i.id);
+        const ia = accts.filter((a) => a.institutionId === i.id && a.kind !== 'divida');
         const ic = cards.filter((c) => c.institutionId === i.id);
         return `<article class="inst" style="--c:${i.color || COLORS[0]}">
           <header><button type="button" class="inst-name" data-inst="${i.id}"><i></i>${esc(i.name)}${icon('edit', 'sm')}</button>
@@ -75,6 +84,11 @@ export function render(el) {
         </article>`;
       })
       .join('')}
+  </section>
+
+  <section class="block">
+    <header class="block-head"><h3>Outras dívidas</h3>${tip('Saldos devedores sem parcelas definidas, como um cheque especial que o banco transferiu para uma conta à parte, ou uma dívida em atraso. Pagamentos são transferências para a dívida; juros entram em Atualizar saldo. Quando virar acordo com parcelas, use Renegociar.')}<button type="button" class="btn small" data-new-debt>${icon('plus')}Dívida</button></header>
+    ${debts.length ? `<ul class="rows">${debts.map(acctRow).join('')}</ul>` : `<p class="empty">Nenhuma dívida avulsa.</p>`}
   </section>
 
   <div class="two-col">
@@ -90,6 +104,7 @@ export function render(el) {
   ${S.acct.some((a) => a.archived) || S.card.some((c) => c.archived) ? `<p class="foot-note">${S.acct.filter((a) => a.archived).length + S.card.filter((c) => c.archived).length} itens arquivados não aparecem aqui, mas continuam no histórico.</p>` : ''}`;
 
   el.querySelector('[data-new-inst]').addEventListener('click', () => openInst());
+  el.querySelector('[data-new-debt]').addEventListener('click', () => openDebt());
   el.querySelectorAll('[data-inst]').forEach((b) => b.addEventListener('click', () => openInst(b.dataset.inst)));
   el.querySelectorAll('[data-add-acct]').forEach((b) => b.addEventListener('click', () => openAcct(null, { institutionId: b.dataset.addAcct, kind: b.dataset.kind })));
   el.querySelectorAll('[data-add-card]').forEach((b) => b.addEventListener('click', () => openCard(null, { institutionId: b.dataset.addCard })));
@@ -132,6 +147,7 @@ function openInst(id) {
 /* ---------- Conta ---------- */
 function openAcct(id, preset = {}) {
   const S = store.snapshot();
+  if (id && S.byId.get(id)?.kind === 'divida') return openDebt(id);
   const td = today();
   const a = id ? S.byId.get(id) : { kind: preset.kind || 'corrente', institutionId: preset.institutionId || '', name: preset.name || '', opening: 0, openingDate: td, overdraftLimit: 0 };
   let kind = a.kind;
@@ -139,7 +155,7 @@ function openAcct(id, preset = {}) {
     ${kind === 'corrente' ? field('Limite do cheque especial', moneyInput('overdraftLimit', a.overdraftLimit || 0), 'Quanto o banco deixa a conta ficar negativa. Serve para acompanhar o uso do limite.') : ''}
     ${kind === 'voucher' ? field('Tipo de voucher', `<select name="voucherKind">${Object.entries(VOUCHER_KINDS).map(([k, l]) => opt(k, l, k === a.voucherKind)).join('')}</select>`) : ''}
     ${kind === 'investimento' ? field('Tipo de investimento', `<select name="investKind">${Object.entries(INVEST_KINDS).map(([k, l]) => opt(k, l, k === a.investKind)).join('')}</select>`) : ''}`;
-  const kinds = Object.entries(ACCOUNT_KINDS);
+  const kinds = Object.entries(ACCOUNT_KINDS).filter(([k]) => k !== 'divida');
   sheet({
     title: id ? 'Editar conta' : 'Nova conta',
     body: `<form class="form" data-f>
@@ -199,26 +215,42 @@ function acctDetail(id) {
   const S = store.snapshot();
   const a = S.byId.get(id);
   const b = balances(S, today()).get('a:' + id) || 0;
+  const isDebt = a.kind === 'divida';
+  const canReneg = b < 0 && (isDebt || a.kind === 'corrente' || a.kind === 'poupanca');
   const txs = S.tx.filter((t) => t.from?.id === id || t.to?.id === id).slice(-20).reverse();
   sheet({
     title: a.name,
     wide: true,
-    body: `<div class="detail-top"><div><span>Saldo</span><b class="${b < 0 ? 'neg' : ''}">${money(b)}</b></div>
-      ${a.kind === 'corrente' && a.overdraftLimit ? `<div><span>Disponível com cheque especial</span><b>${money(b + a.overdraftLimit)}</b></div>` : ''}</div>
+    body: `<div class="detail-top">${
+      isDebt
+        ? `<div><span>Saldo devedor</span><b class="${b < 0 ? 'neg' : ''}">${money(Math.max(0, -b))}</b></div>`
+        : `<div><span>Saldo</span><b class="${b < 0 ? 'neg' : ''}">${money(b)}</b></div>
+      ${a.kind === 'corrente' && a.overdraftLimit ? `<div><span>Disponível com cheque especial</span><b>${money(b + a.overdraftLimit)}</b></div>` : ''}`
+    }</div>
       <div class="detail-actions">
-        <button type="button" class="btn" data-adjust>${icon('refresh')}${a.kind === 'investimento' ? 'Atualizar saldo' : 'Ajustar saldo'}</button>
+        ${isDebt && b < 0 ? `<button type="button" class="btn primary" data-paydebt>Pagar</button>` : ''}
+        ${canReneg ? `<button type="button" class="btn" data-reneg>${icon('swap')}Renegociar</button>` : ''}
+        <button type="button" class="btn${isDebt ? ' ghost' : ''}" data-adjust>${icon('refresh')}${a.kind === 'investimento' || isDebt ? 'Atualizar saldo' : 'Ajustar saldo'}</button>
         <button type="button" class="btn ghost" data-edit>${icon('edit')}Editar</button>
-        <button type="button" class="btn ghost danger-text" data-del>${icon('trash')}${'Remover'}</button>
+        <button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Remover</button>
       </div>
       <h4 class="sub">Últimos lançamentos</h4>
       ${txs.length ? txs.map((t) => txRow(S, t, { showDate: true })).join('') : `<p class="empty">Nenhum lançamento nesta conta.</p>`}`,
     onMount(el, close) {
       el.querySelector('[data-edit]').onclick = () => {
         close();
-        openAcct(id);
+        isDebt ? openDebt(id) : openAcct(id);
       };
       el.querySelector('[data-del]').onclick = () => removeWallet(id, 'a', close);
       el.querySelector('[data-adjust]').onclick = () => adjust(id, b);
+      el.querySelector('[data-paydebt]')?.addEventListener('click', () => {
+        close();
+        openTx({ type: 'transf', toV: `a:${id}`, desc: `Pagamento ${a.name}` });
+      });
+      el.querySelector('[data-reneg]')?.addEventListener('click', () => {
+        close();
+        openRenegotiate({ acct: id });
+      });
       el.querySelectorAll('[data-tx]').forEach((x) => (x.onclick = () => openTx({ id: x.dataset.tx })));
     },
   });
@@ -227,22 +259,93 @@ function acctDetail(id) {
 function adjust(id, current) {
   const S = store.snapshot();
   const a = S.byId.get(id);
+  const isDebt = a.kind === 'divida';
+  const shown = isDebt ? Math.max(0, -current) : current;
   sheet({
-    title: a.kind === 'investimento' ? 'Atualizar saldo' : 'Ajustar saldo',
+    title: a.kind === 'investimento' || isDebt ? 'Atualizar saldo' : 'Ajustar saldo',
     body: `<form class="form" data-f>
-      <p class="sheet-text">Saldo no Pago: <b>${money(current)}</b>. Informe o saldo real; a diferença vira um ajuste${a.kind === 'investimento' ? ' (rendimento, depósito de FGTS etc.)' : ''} e não conta como entrada ou saída do mês.</p>
-      ${moneyInput('v', current, { big: true, allowNeg: true, autofocus: true })}
+      <p class="sheet-text">${
+        isDebt
+          ? `Devido no Pago: <b>${money(shown)}</b>. Informe quanto a dívida está hoje (com juros e encargos). A diferença vira um ajuste e não conta como saída do mês.`
+          : `Saldo no Pago: <b>${money(current)}</b>. Informe o saldo real; a diferença vira um ajuste${a.kind === 'investimento' ? ' (rendimento, depósito de FGTS etc.)' : ''} e não conta como entrada ou saída do mês.`
+      }</p>
+      ${moneyInput('v', shown, { big: true, allowNeg: !isDebt, autofocus: true })}
       <label class="field"><span>Data</span><input name="date" type="date" value="${today()}" required></label>
       <div class="sheet-actions"><span></span><button class="btn primary">Salvar ajuste</button></div></form>`,
     onMount(el, close) {
       const f = el.querySelector('[data-f]');
       f.onsubmit = async (e) => {
         e.preventDefault();
-        const delta = readMoney(f.v) - current;
+        const target = isDebt ? -Math.abs(readMoney(f.v)) : readMoney(f.v);
+        const delta = target - current;
         if (!delta) return close();
-        await store.save('tx', { type: 'ajuste', amount: delta, date: f.date.value, to: { k: 'a', id }, desc: a.kind === 'investimento' ? 'Atualização de saldo' : 'Ajuste de saldo' });
+        await store.save('tx', { type: 'ajuste', amount: delta, date: f.date.value, to: { k: 'a', id }, desc: isDebt ? 'Atualização da dívida' : a.kind === 'investimento' ? 'Atualização de saldo' : 'Ajuste de saldo' });
         close();
-        toast('Saldo ajustado');
+        toast(isDebt ? 'Dívida atualizada' : 'Saldo ajustado');
+      };
+    },
+  });
+}
+
+/* ---------- Outras dívidas ----------
+   Uma dívida avulsa é uma conta do tipo "dívida" com saldo negativo. Quando o banco tira o
+   cheque especial da conta e o coloca numa dívida à parte, isso é uma transferência da dívida
+   para a conta: a conta volta a zero e a dívida total não muda. */
+function openDebt(id) {
+  const S = store.snapshot();
+  const td = today();
+  const a = id ? S.byId.get(id) : null;
+  const bal = balances(S, td);
+  const negatives = S.acct.filter((x) => !x.archived && (x.kind === 'corrente' || x.kind === 'poupanca') && (bal.get('a:' + x.id) || 0) < 0);
+  let origin = negatives.length ? 'conta' : 'valor';
+  const dyn = () =>
+    origin === 'conta'
+      ? `${field('Conta que estava negativa', `<select name="src">${negatives.length ? negatives.map((x) => opt(x.id, `${x.name}${x.institutionId ? ' ' + (S.byId.get(x.institutionId)?.name || '') : ''} (${money(bal.get('a:' + x.id))})`, false)).join('') : '<option value="">Nenhuma conta negativa</option>'}</select>`, 'A conta volta a zero e o valor passa para esta dívida. A dívida total não muda.')}
+         <span class="field-label">Valor transferido</span>${moneyInput('amount', negatives[0] ? -(bal.get('a:' + negatives[0].id) || 0) : 0, { big: true })}`
+      : `<span class="field-label">Valor devido</span>${moneyInput('amount', 0, { big: true })}`;
+  sheet({
+    title: id ? 'Editar dívida' : 'Nova dívida',
+    body: `<form class="form" data-f>
+      <label class="field"><span>Nome</span><input name="name" value="${esc(a?.name || '')}" required maxlength="40" placeholder="Ex.: Dívida cheque especial"></label>
+      ${field('Instituição', `<select name="institutionId"><option value="">Nenhuma</option>${S.inst.map((i) => opt(i.id, i.name, i.id === a?.institutionId)).join('')}</select>`)}
+      ${id ? '' : `${seg('origin', [['conta', 'Veio de uma conta negativa'], ['valor', 'Informar valor']], origin)}
+        <div data-dyn>${dyn()}</div>
+        <label class="field"><span>Data</span><input name="date" type="date" value="${td}" required></label>`}
+      <div class="sheet-actions">${id ? `<button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Excluir</button>` : '<span></span>'}<button class="btn primary">Salvar</button></div>
+    </form>`,
+    onMount(el, close) {
+      const f = el.querySelector('[data-f]');
+      const wireSrc = () =>
+        f.src?.addEventListener('change', () => {
+          const v = -(bal.get('a:' + f.src.value) || 0);
+          f.amount.value = (Math.max(0, v) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+        });
+      wireSrc();
+      f.querySelectorAll('input[name=origin]').forEach((r) =>
+        r.addEventListener('change', () => {
+          origin = r.value;
+          el.querySelector('[data-dyn]').innerHTML = dyn();
+          bindMoney(el);
+          wireSrc();
+        }),
+      );
+      el.querySelector('[data-del]')?.addEventListener('click', () => removeWallet(id, 'a', close));
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        if (id) {
+          await store.save('acct', { ...a, name: f.name.value.trim(), institutionId: f.institutionId.value }, id);
+          close();
+          return toast('Dívida salva');
+        }
+        const amount = Math.abs(readMoney(f.amount));
+        if (!amount) return toast('Informe o valor.');
+        if (origin === 'conta' && !f.src.value) return toast('Escolha a conta.');
+        const date = f.date.value;
+        const nid = await store.save('acct', { kind: 'divida', name: f.name.value.trim(), institutionId: f.institutionId.value, opening: origin === 'valor' ? -amount : 0, openingDate: date, archived: false });
+        if (origin === 'conta')
+          await store.save('tx', { type: 'transf', amount, date, from: { k: 'a', id: nid }, to: { k: 'a', id: f.src.value }, desc: 'Saldo negativo transferido para dívida' });
+        close();
+        toast('Dívida registrada');
       };
     },
   });
@@ -332,6 +435,7 @@ function cardDetail(id) {
       </div>
       <div class="detail-actions">
         ${info.current && info.current.remaining > 0 ? `<button type="button" class="btn primary" data-pay>Pagar fatura</button>` : ''}
+        ${info.outstanding > 0 ? `<button type="button" class="btn" data-reneg>${icon('swap')}Renegociar</button>` : ''}
         <button type="button" class="btn ghost" data-edit>${icon('edit')}Editar</button>
         <button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Remover</button>
       </div>
@@ -343,6 +447,10 @@ function cardDetail(id) {
         openCard(id);
       };
       el.querySelector('[data-del]').onclick = () => removeWallet(id, 'c', close);
+      el.querySelector('[data-reneg]')?.addEventListener('click', () => {
+        close();
+        openRenegotiate({ card: id });
+      });
       el.querySelector('[data-pay]')?.addEventListener('click', () => {
         const ob = obligations(S, info.current.due.slice(0, 7), info.current.due.slice(0, 7), td).find((o) => o.id === `i:${id}:${info.current.ref}`);
         if (ob) openPay(ob);

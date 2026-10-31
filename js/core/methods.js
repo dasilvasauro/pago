@@ -49,8 +49,8 @@ export function methodChoices(S, type, fromV, toV) {
   if (type === 'transf') {
     const kf = kindOf(S, fromV);
     const kt = kindOf(S, toV);
-    if (!kf || kf === 'carteira' || kf === 'credit') return [];
-    if (kt === 'credit') return ['pix', 'boleto', 'auto', 'outro'];
+    if (!kf || kf === 'carteira' || kf === 'credit' || kf === 'divida') return [];
+    if (kt === 'credit' || kt === 'divida') return ['pix', 'boleto', 'auto', 'outro'];
     return ['pix', 'ted', 'outro'];
   }
   return [];

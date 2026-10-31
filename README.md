@@ -155,7 +155,9 @@ Ao publicar uma nova versão, aumente `VERSION` em `sw.js` e `app.version` em `j
 
 - **Cheque especial em uso:** contas com saldo negativo.
 - **Cartões de crédito:** tudo o que foi comprado e ainda não pago, incluindo parcelas futuras.
-- **Acordos e parcelamentos:** parcelas restantes de renegociações, empréstimos, financiamentos e contas parceladas.
+- **Acordos e parcelamentos:** parcelas restantes e entrada ainda não paga de renegociações, empréstimos, financiamentos e contas parceladas.
+- **Outras dívidas:** saldos devedores sem parcelas definidas (Carteira, Outras dívidas).
+- **Contas em atraso:** contas recorrentes vencidas e não pagas. Só contam vencimentos a partir do dia em que a conta foi cadastrada, porque o app não sabe o que foi pago antes disso.
 
 Cada lançamento do diário altera saldos e dívida na hora. Um salário que cai numa conta negativa abate o cheque especial automaticamente.
 
@@ -189,6 +191,28 @@ Cada lançamento do diário altera saldos e dívida na hora. Um salário que cai
 
 - **Saldo total:** soma os valores positivos nas contas correntes, poupanças e em dinheiro.
 - **Contas no negativo:** não entram no saldo; elas aparecem como cheque especial na dívida.
+
+**Outras dívidas.** Quando o banco tira o cheque especial da conta e o coloca numa dívida à parte, cadastre em Carteira, Outras dívidas, com a opção "Veio de uma conta negativa".
+
+- **O que acontece:** a conta volta a zero, o valor passa para a dívida, e a dívida total não muda.
+- **Pagamentos:** são transferências para a dívida.
+- **Juros e encargos:** entram em Atualizar saldo.
+
+**Renegociar.** Para transformar dívidas em um acordo com entrada e parcelas, use o botão Renegociar em Planejar. Ele também aparece no detalhe de uma conta negativa, de um cartão ou de uma dívida avulsa.
+
+1. **Marque o que entrou no acordo:**
+   - contas recorrentes em atraso;
+   - saldos negativos de contas;
+   - cartões;
+   - dívidas avulsas;
+   - um valor informado, para dívidas que não estão no Pago, como contas que atrasaram antes de você usar o app.
+2. **Informe as condições:** entrada (com data), valor das parcelas, quantidade e mês da primeira. O app mostra quanto o acordo custa a mais (ou a menos) que o valor original.
+3. **Ao criar o acordo:**
+   - as contas atrasadas ficam como "Renegociada";
+   - os saldos renegociados são zerados por ajustes ligados ao acordo;
+   - a dívida total passa a refletir o acordo.
+
+Excluir o acordo desfaz tudo isso.
 - **Vouchers e investimentos:** aparecem à parte, abaixo do valor.
 
 **Pagar uma fatura** é uma transferência da conta para o cartão de crédito. Ela não conta como gasto, porque a compra já contou quando foi feita.

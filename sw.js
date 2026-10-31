@@ -1,5 +1,5 @@
 // Service worker do Pago: app disponível offline + lembretes periódicos.
-const VERSION = 'pago-v1.2.2';
+const VERSION = 'pago-v1.3.0';
 const SHELL = [
   './',
   'index.html',

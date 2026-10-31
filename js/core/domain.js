@@ -3,10 +3,13 @@
 // Princípio: dívida não é cadastrada à parte, ela é DERIVADA.
 //   - Conta com saldo negativo  -> cheque especial em uso
 //   - Cartão de crédito         -> tudo o que foi comprado e ainda não pago (inclui parcelas futuras)
-//   - Parcelamentos e acordos   -> parcelas restantes (renegociações, empréstimos, contas parceladas)
+//   - Parcelamentos e acordos   -> parcelas restantes e entrada não paga
+//   - Outras dívidas            -> contas do tipo "dívida": saldo devedor sem parcelas definidas
+//                                  (ex.: cheque especial que o banco transferiu para uma conta à parte)
+//   - Contas em atraso          -> contas recorrentes vencidas e não pagas (desde que foram cadastradas)
 // Assim, todo lançamento do diário altera a dívida automaticamente: um salário que cai numa
 // conta negativa abate o cheque especial sem nenhum passo extra.
-import { addMonths, ymOf, clampDay, addDays, monthsBetween, splitParts, daysBetween, sum } from '../lib/util.js';
+import { addMonths, ymOf, clampDay, addDays, monthsBetween, splitParts, daysBetween, sum, isoOf } from '../lib/util.js';
 
 export const ACCOUNT_KINDS = {
   corrente: 'Conta corrente',
@@ -14,6 +17,7 @@ export const ACCOUNT_KINDS = {
   carteira: 'Dinheiro',
   voucher: 'Voucher',
   investimento: 'Investimento',
+  divida: 'Dívida',
 };
 export const VOUCHER_KINDS = { alimentacao: 'Alimentação', refeicao: 'Refeição', multi: 'Multibenefício', outro: 'Outro' };
 export const INVEST_KINDS = {
@@ -90,11 +94,47 @@ export function paidKeys(S, upto = '9999-12-31') {
   for (const t of S.tx) if (t.ob && t.date <= upto) for (const k of t.ob) if (!m.has(k)) m.set(k, t);
   return m;
 }
+export const downKey = (p) => `p:${p.id}:entrada`;
 export function planStatus(p, paid) {
   let count = p.paidBefore || 0;
   for (let k = (p.paidBefore || 0) + 1; k <= p.n; k++) if (paid.has(`p:${p.id}:${planMonthOf(p, k)}`)) count++;
   const remainingN = Math.max(0, p.n - count);
-  return { paid: count, remainingN, remaining: remainingN * p.amount, total: p.n * p.amount };
+  const downOpen = p.down > 0 && !paid.has(downKey(p));
+  return {
+    paid: count,
+    remainingN,
+    downOpen,
+    remaining: remainingN * p.amount + (downOpen ? p.down : 0),
+    total: p.n * p.amount + (p.down || 0),
+  };
+}
+
+// Compromissos renegociados (cobertos por um acordo) deixam de contar como atrasados.
+export function coveredKeys(S, upto = '9999-12-31') {
+  const s = new Set();
+  for (const p of S.plan) if ((p.openingDate || '') <= upto) for (const k of p.covers || []) s.add(k);
+  return s;
+}
+const createdOn = (x) => (x._ca ? isoOf(new Date(x._ca)) : '0000-00-00');
+
+// Contas recorrentes vencidas e não pagas até a data. Vencimentos anteriores ao cadastro da conta
+// são ignorados: o app não sabe se foram pagos antes de você começar a usá-lo.
+export function lateBills(S, date, paid = paidKeys(S, date), covered = coveredKeys(S, date)) {
+  const out = [];
+  const ym = ymOf(date);
+  for (const b of S.bill) {
+    if (b.dir === 'in' || !b.startMonth) continue;
+    const since = createdOn(b);
+    for (let m = b.startMonth; m <= ym; m = addMonths(m, 1)) {
+      if (!billActive(b, m)) continue;
+      const due = clampDay(m, b.day);
+      if (due >= date || due < since) continue;
+      const key = `b:${b.id}:${m}`;
+      if (paid.has(key) || covered.has(key)) continue;
+      out.push({ key, bill: b, month: m, date: due, amount: b.amount || 0 });
+    }
+  }
+  return out;
 }
 
 /* ---------- Cartões de crédito ----------
@@ -170,11 +210,14 @@ export function cardInfo(S, card, today, bal = balances(S, today)) {
 export function position(S, date) {
   const bal = balances(S, date);
   const paid = paidKeys(S, date);
-  const p = { overdraft: 0, cards: 0, plans: 0, liquid: 0, bank: 0, cash: 0, invested: 0, vouchers: 0, credit: 0 };
+  const p = { overdraft: 0, cards: 0, plans: 0, other: 0, late: 0, liquid: 0, bank: 0, cash: 0, invested: 0, vouchers: 0, credit: 0 };
   for (const a of S.acct) {
     if (a.openingDate > date) continue;
     const b = bal.get('a:' + a.id) || 0;
-    if (a.kind === 'investimento') p.invested += b;
+    if (a.kind === 'divida') {
+      if (b < 0) p.other -= b;
+      else p.credit += b;
+    } else if (a.kind === 'investimento') p.invested += b;
     else if (a.kind === 'voucher') p.vouchers += Math.max(0, b);
     else if (b < 0) p.overdraft -= b;
     else {
@@ -193,7 +236,8 @@ export function position(S, date) {
     if ((pl.openingDate || '') > date) continue;
     p.plans += planStatus(pl, paid).remaining;
   }
-  p.debt = p.overdraft + p.cards + p.plans;
+  p.late = sum(lateBills(S, date, paid), (x) => x.amount);
+  p.debt = p.overdraft + p.cards + p.plans + p.other + p.late;
   p.assets = p.liquid + p.invested + p.vouchers + p.credit;
   p.net = p.assets - p.debt;
   return p;
@@ -228,7 +272,15 @@ const billActive = (b, m) => b.active !== false && b.startMonth <= m && (!b.endM
 
 export function obligations(S, fromYM, toYM, today) {
   const paid = paidKeys(S);
+  const covered = coveredKeys(S);
   const out = [];
+  for (const p of S.plan) {
+    if (!(p.down > 0) || !p.downDate) continue;
+    const m = ymOf(p.downDate);
+    if (m < fromYM || m > toYM) continue;
+    const key = downKey(p);
+    out.push({ id: key, kind: 'plan', dir: 'out', title: p.name, date: p.downDate, month: m, parts: [{ key, label: 'Entrada', amount: p.down }], amount: p.down, paid: paid.has(key), tx: paid.get(key), src: p, categoryId: p.categoryId, ref: p.source || null });
+  }
   for (let m = fromYM; m <= toYM; m = addMonths(m, 1)) {
     const merged = new Set();
     for (const b of S.bill) {
@@ -251,7 +303,8 @@ export function obligations(S, fromYM, toYM, today) {
         month: m,
         parts,
         amount: sum(parts, (x) => x.amount),
-        paid: parts.every((x) => paid.has(x.key)),
+        paid: parts.every((x) => paid.has(x.key) || covered.has(x.key)),
+        reneg: parts.some((x) => covered.has(x.key) && !paid.has(x.key)),
         tx: paid.get(key) || paid.get(parts[1]?.key),
         src: b,
         categoryId: b.categoryId,

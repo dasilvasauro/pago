@@ -102,6 +102,7 @@ export function exportICS() {
     push(`b-${b.id}`, clampDay(startYM, b.day), `${b.dir === 'in' ? 'Receber' : 'Pagar'}: ${b.name}`, `RRULE:FREQ=MONTHLY;BYMONTHDAY=${Math.min(b.day, 28)}${until}`);
   }
   for (const p of S.plan) {
+    if (p.down > 0 && p.downDate && p.downDate >= td) push(`p-${p.id}-entrada`, p.downDate, `Pagar: entrada ${p.name}`);
     if (p.billId) continue;
     for (let k = (p.paidBefore || 0) + 1; k <= p.n; k++) {
       const m = planMonthOf(p, k);

@@ -613,6 +613,23 @@ body.has-sheet { overflow: hidden; }
 .hero-switch { gap: 4px; }
 .hero-switch .seg.small button { font-size: 13.5px; padding: 6px 12px; }
 
+/* ---------- Renegociação ---------- */
+.head-actions { display: flex; gap: 6px; margin-left: auto; }
+.reneg-list { display: grid; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.reneg-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; cursor: pointer; }
+.reneg-item + .reneg-item { border-top: 1px solid var(--line); }
+.reneg-item:has(input:checked) { background: color-mix(in srgb, var(--g2) 8%, transparent); }
+.reneg-item input { width: 18px; height: 18px; accent-color: var(--g2); margin: 0; }
+.reneg-item span { display: flex; flex-direction: column; min-width: 0; }
+.reneg-item b { font-size: 14.5px; font-weight: 600; }
+.reneg-item small { font-size: 12.5px; color: var(--muted); }
+.reneg-item em { font-style: normal; font-weight: 700; font-size: 14.5px; }
+.reneg-total, .reneg-box { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
+.reneg-total span, .reneg-box span { color: var(--muted); font-weight: 600; font-size: 14px; }
+.reneg-total b, .reneg-box b { font-size: 18px; }
+.reneg-box { flex-wrap: wrap; }
+.reneg-box small { flex-basis: 100%; font-size: 12.5px; color: var(--muted); }
+
 /* ---------- Seletores personalizados ---------- */
 .pick-native { position: absolute !important; width: 1px !important; height: 1px !important; opacity: 0; pointer-events: none; clip-path: inset(50%); }
 .pick {
