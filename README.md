@@ -162,7 +162,7 @@ Ao publicar uma nova versão, aumente `VERSION` em `sw.js` e `app.version` em `j
 - **Cartões de crédito:** tudo o que foi comprado e ainda não pago, incluindo parcelas futuras.
 - **Acordos e parcelamentos:** parcelas restantes e entrada ainda não paga de renegociações, empréstimos, financiamentos e contas parceladas.
 - **Outras dívidas:** saldos devedores sem parcelas definidas (Carteira, Outras dívidas).
-- **Contas em atraso:** contas recorrentes vencidas e não pagas. Só contam vencimentos a partir do dia em que a conta foi cadastrada, porque o app não sabe o que foi pago antes disso.
+- **Contas em atraso:** contas recorrentes vencidas e não pagas desde o mês de início de cada conta. Meses pagos fora do app podem ser marcados como "Já paga".
 
 Cada lançamento do diário altera saldos e dívida na hora. Um salário que cai numa conta negativa abate o cheque especial automaticamente.
 
@@ -239,6 +239,18 @@ Os ajustes valem para o calendário, as contas em atraso, a dívida total, a pro
   - **Rendimentos:** entram em Atualizar saldo e não contam como depósito.
 - **Nos totais:** o valor dos cofrinhos entra no patrimônio, à parte do saldo total.
 
+**Aviso de contas atrasadas.** Com contas recorrentes em atraso (luz, água, internet...), a tela inicial mostra um aviso com três opções. Cartão e cheque especial não entram nesse aviso.
+
+- **Pagar agora:** abre a lista das contas atrasadas agrupadas por conta, com os meses de cada uma. Em cada mês dá para usar Pagar ou Já paga; em cada conta, Pagar todos ou Renegociar.
+- **Lembre-me mais tarde:** o aviso volta em uma hora.
+- **Não consigo pagar agora:** o aviso, e as notificações dessas contas, somem por 7 dias. Se outra conta atrasar nesse período, o aviso volta antes.
+
+**Gráfico do Diário.** Mostra uma barra por dia do mês, com as saídas, ou com as entradas ou transferências conforme o filtro. Um ponto verde marca os dias com entrada.
+
+- **Ver um dia:** toque numa barra ou arraste o dedo pelo gráfico. Ao soltar, a lista mostra só aquele dia.
+- **Voltar ao mês inteiro:** toque de novo no mesmo dia ou em "Ver o mês inteiro".
+- **No computador:** as setas do teclado navegam pelos dias.
+
 **Pagar uma fatura** é uma transferência da conta para o cartão de crédito. Ela não conta como gasto, porque a compra já contou quando foi feita.
 
 **Resumo do dia.** Ao abrir o app num novo dia aparece o resumo do dia anterior. Se você passou dias sem abrir, o resumo cobre todo o período: variação da dívida, entradas, saídas, dias sem registro e o que ficou pendente.
@@ -277,7 +289,7 @@ Os ajustes valem para o calendário, as contas em atraso, a dívida total, a pro
 - **Exportações:**
   - backup completo em JSON, que pode ser importado de volta;
   - CSV do mês, compatível com Excel em português;
-  - relatório do mês, que abre pronto para imprimir ou salvar em PDF.
+  - relatório do mês, que abre dentro do app, com os botões Imprimir ou PDF e Baixar.
 
 ## Lembretes
 

@@ -1,10 +1,11 @@
 import * as store from '../core/store.js';
 import { obligations, dueAmount, planStatus, paidKeys, PLAN_KINDS, planMonthOf, lateBills, balances, cardInfo, walletName, occId, occMap } from '../core/domain.js';
 import { today } from '../lib/clock.js';
-import { esc, money, ymOf, addMonths, fmtMonth, fmtMonthShort, relDay, sum, fmtDay, clampDay } from '../lib/util.js';
+import { esc, money, ymOf, addMonths, fmtMonth, fmtMonthShort, relDay, sum, fmtDay, clampDay, fmtDate } from '../lib/util.js';
 import { icon, tip, sheet, moneyInput, readMoney, opt, seg, field, toast, confirmDialog } from '../ui/ui.js';
 import { openPay, walletOptions, decodeWallet, encodeWallet } from './txform.js';
-import { METHODS, BILL_METHODS } from '../core/methods.js';
+import { subscribe } from '../core/store.js';
+import { METHODS, BILL_METHODS, methodChoices } from '../core/methods.js';
 
 const methodSelect = (sel) =>
   field('Forma de pagamento', `<select name="method"><option value="">Não definida</option>${BILL_METHODS.map((m) => opt(m, METHODS[m], m === sel)).join('')}</select>`, 'Sugestão usada ao registrar o pagamento. Pode ser trocada na hora.');
@@ -49,15 +50,15 @@ export function render(el) {
         ? `<ul class="ob-list">${obs
             .map((o) => {
               const late = !o.paid && o.date < td;
-              const state = o.reneg ? `<span class="pill">${icon('swap')}Renegociada</span>` : o.paid ? `<span class="pill ok">${icon('check')}${o.dir === 'in' ? 'Recebido' : 'Pago'}</span>` : late ? `<span class="pill late">Atrasado</span>` : `<span class="pill">${relDay(o.date, td)}</span>`;
+              const state = o.reneg ? `<span class="pill">${icon('swap')}Renegociada</span>` : o.settled ? `<span class="pill ok">${icon('check')}Pago fora do app</span>` : o.paid ? `<span class="pill ok">${icon('check')}${o.dir === 'in' ? 'Recebido' : 'Pago'}</span>` : late ? `<span class="pill late">Atrasado</span>` : `<span class="pill">${relDay(o.date, td)}</span>`;
               return `<li class="${o.paid ? 'done' : ''}">
                 <div class="ob-date"><b>${o.date.slice(8)}</b><span>${fmtDay(o.date).split(' ')[1]}</span></div>
-                <div class="ob-main">${o.kind === 'bill' && !o.paid ? `<button type="button" class="ob-title" data-occ="${esc(o.id)}" aria-label="Ajustar ${esc(o.title)} deste mês">${esc(o.title)}${icon('edit', 'sm')}</button>` : `<b>${esc(o.title)}</b>`}
+                <div class="ob-main">${o.kind === 'bill' && (!o.paid || o.settled) ? `<button type="button" class="ob-title" data-occ="${esc(o.id)}" aria-label="Ajustar ${esc(o.title)} deste mês">${esc(o.title)}${icon('edit', 'sm')}</button>` : `<b>${esc(o.title)}</b>`}
                   ${o.parts.length > 1 ? `<span>${o.parts.map((p) => `${esc(p.label)} ${money(p.amount)}`).join(' + ')}</span>` : o.kind === 'invoice' ? `<span>${o.partial ? `Pago ${money(o.amount - o.remaining)} de ${money(o.amount)}` : 'Fatura do cartão'}</span>` : o.kind === 'plan' ? `<span>${esc(o.parts[0].label)}</span>` : o.src.variable ? '<span>Valor variável</span>' : ''}
                   <span class="ob-pills">${state}${o.edited ? '<span class="pill">Ajustado</span>' : ''}</span>
                 </div>
                 <div class="ob-side"><span class="amt ${o.dir === 'in' ? 'pos' : ''}">${money(o.kind === 'invoice' && !o.paid ? o.remaining : o.amount)}</span>
-                  ${o.reneg ? '' : `<button type="button" class="btn small ${o.paid ? 'ghost' : ''}" data-ob="${esc(o.id)}">${o.paid ? 'Ver' : o.dir === 'in' ? 'Receber' : 'Pagar'}</button>`}</div>
+                  ${o.reneg || o.settled ? '' : `<button type="button" class="btn small ${o.paid ? 'ghost' : ''}" data-ob="${esc(o.id)}">${o.paid ? 'Ver' : o.dir === 'in' ? 'Receber' : 'Pagar'}</button>`}</div>
               </li>`;
             })
             .join('')}</ul>`
@@ -408,6 +409,7 @@ export function openOccurrence(o) {
       ${extra.length ? `<ul class="parts">${extra.map((p) => `<li><span>${esc(p.label)} <small>vem junto, valor do parcelamento</small></span><span>${money(p.amount)}</span></li>`).join('')}</ul>` : ''}
       <label class="field"><span>Vencimento</span><input name="date" type="date" value="${o.date}" required></label>
       <label class="check"><input type="checkbox" name="skip"><span>Não haverá cobrança neste mês</span></label>
+      <label class="check"><input type="checkbox" name="settled"${o.settled ? ' checked' : ''}><span>Já foi paga fora do Pago</span>${tip('Para meses pagos antes de você começar a usar o app. O mês sai das contas em atraso sem criar lançamento no diário.')}</label>
       <label class="check"><input type="checkbox" name="forward"><span>Usar este valor daqui em diante</span>${tip('Muda o valor padrão da conta a partir deste mês. Meses anteriores ainda não pagos mantêm o valor que tinham.')}</label>
       <div class="sheet-actions">${o.edited ? `<button type="button" class="btn ghost" data-reset>${icon('refresh')}Restaurar padrão</button>` : '<span></span>'}<button class="btn primary">Salvar</button></div>
     </form>`,
@@ -429,6 +431,17 @@ export function openOccurrence(o) {
           close();
           return toast('Mês marcado sem cobrança');
         }
+        if (f.settled.checked !== !!o.settled) {
+          const keep = { ...(o.occ || {}) };
+          for (const k of Object.keys(keep)) if (k === 'id' || k.startsWith('_')) delete keep[k];
+          if (f.settled.checked) {
+            await store.save('occ', { ...keep, billId: b.id, month: o.month, amount: Math.abs(readMoney(f.amount)), settled: true }, id);
+            close();
+            return toast('Mês marcado como pago');
+          }
+          delete keep.settled;
+          await store.save('occ', { ...keep, billId: b.id, month: o.month }, id);
+        }
         const amount = Math.abs(readMoney(f.amount));
         const date = f.date.value !== defDate ? f.date.value : '';
         if (f.forward.checked) {
@@ -448,6 +461,122 @@ export function openOccurrence(o) {
         } else await store.save('occ', { billId: b.id, month: o.month, amount, ...(date ? { date } : {}) }, id);
         close();
         toast('Mês ajustado');
+      };
+    },
+  });
+}
+
+/* ---------- Contas atrasadas (tela de "Pagar agora") ----------
+   Agrupa por conta recorrente, lista os meses e permite pagar um mês, pagar todos,
+   marcar como já pago fora do app ou renegociar. Atualiza sozinha a cada pagamento. */
+export function openLateBills() {
+  let unsub = () => {};
+  sheet({
+    title: 'Contas atrasadas',
+    wide: true,
+    body: `<div data-late></div>`,
+    onMount(el, close) {
+      const box = el.querySelector('[data-late]');
+      const draw = () => {
+        const S = store.snapshot();
+        const td = today();
+        const late = lateBills(S, td);
+        if (!late.length) {
+          box.innerHTML = `<div class="empty-block">${icon('check')}<p>Nenhuma conta atrasada. Tudo em dia.</p></div>`;
+          return;
+        }
+        const groups = new Map();
+        for (const x of late) {
+          const g = groups.get(x.bill.id) || { bill: x.bill, items: [], total: 0 };
+          g.items.push(x);
+          g.total += x.amount;
+          groups.set(x.bill.id, g);
+        }
+        const list = [...groups.values()].sort((a, b) => b.total - a.total);
+        box.innerHTML = `
+          <div class="reneg-total"><span>${late.length} ${late.length === 1 ? 'conta atrasada' : 'contas atrasadas'}</span><b>${money(sum(late, (x) => x.amount))}</b></div>
+          ${list
+            .map(
+              (g) => `<section class="late-group">
+                <header><div><b>${esc(g.bill.name)}</b><span>${g.items.length} ${g.items.length === 1 ? 'mês' : 'meses'}${g.bill.categoryId && S.byId.get(g.bill.categoryId) ? `, ${esc(S.byId.get(g.bill.categoryId).name)}` : ''}</span></div><b>${money(g.total)}</b></header>
+                <ul>${g.items
+                  .map(
+                    (x) => `<li><div><b>${fmtMonth(x.month)}</b><span>Venceu em ${fmtDate(x.date)}</span></div><span class="amt">${money(x.amount)}</span>
+                    <div class="late-acts"><button type="button" class="btn small ghost" data-settle="${esc(x.key)}">Já paga</button><button type="button" class="btn small" data-pay1="${esc(x.key)}">Pagar</button></div></li>`,
+                  )
+                  .join('')}</ul>
+                <div class="late-foot"><button type="button" class="btn small ghost" data-reneg-g="${g.bill.id}">${icon('swap')}Renegociar</button>${g.items.length > 1 ? `<button type="button" class="btn small primary" data-payall="${g.bill.id}">Pagar todos (${money(g.total)})</button>` : ''}</div>
+              </section>`,
+            )
+            .join('')}`;
+        const findOb = (key) => {
+          const m = key.split(':')[2];
+          return obligations(store.snapshot(), m, m, today()).find((o) => o.id === key);
+        };
+        box.querySelectorAll('[data-pay1]').forEach((b) => (b.onclick = () => findOb(b.dataset.pay1) && openPay(findOb(b.dataset.pay1))));
+        box.querySelectorAll('[data-settle]').forEach(
+          (b) =>
+            (b.onclick = async () => {
+              const [, billId, month] = b.dataset.settle.split(':');
+              const prev = occMap(store.snapshot()).get(`${billId}:${month}`);
+              const keep = { ...(prev || {}) };
+              for (const k of Object.keys(keep)) if (k === 'id' || k.startsWith('_')) delete keep[k];
+              const amount = late.find((x) => x.key === b.dataset.settle)?.amount;
+              await store.save('occ', { ...keep, billId, month, amount, settled: true }, occId(billId, month));
+              toast(`${fmtMonth(month)} marcado como pago`, {
+                action: 'Desfazer',
+                onAction: async () => {
+                  if (prev) await store.save('occ', keep, occId(billId, month));
+                  else await store.remove(occId(billId, month));
+                },
+              });
+            }),
+        );
+        box.querySelectorAll('[data-reneg-g]').forEach(
+          (b) =>
+            (b.onclick = () => {
+              close();
+              setTimeout(() => openRenegotiate({ keys: groups.get(b.dataset.renegG).items.map((x) => x.key) }), 240);
+            }),
+        );
+        box.querySelectorAll('[data-payall]').forEach((b) => (b.onclick = () => payAll(groups.get(b.dataset.payall), findOb)));
+      };
+      draw();
+      unsub = subscribe(draw);
+    },
+    onClose: () => unsub(),
+  });
+}
+
+function payAll(g, findOb) {
+  const S = store.snapshot();
+  const b = g.bill;
+  sheet({
+    title: `Pagar ${b.name}`,
+    body: `<form class="form" data-f>
+      <ul class="parts">${g.items.map((x) => `<li><span>${fmtMonth(x.month)}</span><span>${money(x.amount)}</span></li>`).join('')}<li class="total"><span>Total</span><span>${money(g.total)}</span></li></ul>
+      ${field('Pago com', `<select name="w">${walletOptions(S, 'out', encodeWallet(b.source, b.sourceVia))}</select>`)}
+      <label class="field"><span>Data</span><input name="date" type="date" value="${today()}" required></label>
+      <p class="form-meta">Cada mês vira um lançamento no diário, com o valor dele.</p>
+      <div class="sheet-actions"><span></span><button class="btn primary">Registrar ${g.items.length} pagamentos</button></div>
+    </form>`,
+    onMount(el, close) {
+      const f = el.querySelector('[data-f]');
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        const S2 = store.snapshot();
+        const w = decodeWallet(S2, f.w.value);
+        if (!w.ref) return toast('Escolha a conta.');
+        const method = b.method && methodChoices(S2, 'saida', f.w.value, '').includes(b.method) ? b.method : '';
+        for (const x of g.items) {
+          const o = findOb(x.key);
+          const data = { type: 'saida', amount: o?.amount ?? x.amount, date: f.date.value, desc: `${b.name} ${fmtMonthShort(x.month)}`, categoryId: b.categoryId || '', ob: o ? o.parts.map((p) => p.key) : [x.key], from: w.ref };
+          if (w.via) data.via = w.via;
+          if (method) data.method = method;
+          await store.save('tx', data);
+        }
+        close();
+        toast(`${g.items.length} pagamentos registrados`);
       };
     },
   });

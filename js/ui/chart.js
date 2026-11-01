@@ -97,3 +97,101 @@ export function lineChart(host, { points, lines, animate = false }) {
   svg.addEventListener('pointerdown', move);
   svg.addEventListener('pointerleave', leave);
 }
+
+/* ---------- Barras por dia (Diário) ----------
+   days: [{ d, v, inc }]  v = altura da barra; inc = entradas do dia (ponto verde na base).
+   Tocar ou arrastar percorre os dias; soltar seleciona. Setas do teclado também navegam.
+   describe(day|null) devolve o HTML da leitura acima do gráfico. */
+export function dayBars(host, { days, selected, today, onSelect, describe }) {
+  const W = Math.max(280, host.clientWidth || 600);
+  const H = 128;
+  const pad = { t: 8, b: 22 };
+  const n = days.length;
+  const slot = W / n;
+  const bw = Math.max(3, Math.min(18, slot * 0.62));
+  const max = Math.max(1, ...days.map((x) => x.v));
+  const base = H - pad.b;
+  const h = (v) => (v > 0 ? Math.max(3, (v / max) * (base - pad.t)) : 0);
+  const labels = new Set([1, 8, 15, 22, n]);
+  let hover = days.findIndex((x) => x.d === selected);
+
+  host.innerHTML = `<div class="dc-read" aria-live="polite"></div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" tabindex="0" role="slider" aria-label="Dias do mês" aria-valuemin="1" aria-valuemax="${n}">
+      <defs><linearGradient id="dcg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--g1)"/><stop offset="1" stop-color="var(--g2)"/></linearGradient></defs>
+      <line class="dc-base" x1="0" x2="${W}" y1="${base}" y2="${base}"/>
+      ${days
+        .map((x, i) => {
+          const cx = i * slot + slot / 2;
+          const bh = h(x.v);
+          const cls = ['dc-bar', x.d > today && 'future', x.d === today && 'today'].filter(Boolean).join(' ');
+          return `<g data-i="${i}">
+            <rect class="dc-hit" x="${(i * slot).toFixed(1)}" y="0" width="${slot.toFixed(1)}" height="${H}"/>
+            <rect class="${cls}" x="${(cx - bw / 2).toFixed(1)}" y="${(base - bh).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="${Math.min(4, bw / 2).toFixed(1)}"/>
+            ${x.inc > 0 ? `<circle class="dc-inc" cx="${cx.toFixed(1)}" cy="${base + 6}" r="2.6"/>` : ''}
+            ${labels.has(i + 1) ? `<text class="dc-lab" x="${cx.toFixed(1)}" y="${H - 3}" text-anchor="middle">${i + 1}</text>` : ''}
+          </g>`;
+        })
+        .join('')}
+    </svg>`;
+
+  const svg = host.querySelector('svg');
+  const read = host.querySelector('.dc-read');
+  const groups = [...svg.querySelectorAll('g[data-i]')];
+  const show = (i) => {
+    groups.forEach((g, j) => g.classList.toggle('on', j === i));
+    groups.forEach((g, j) => g.classList.toggle('sel', days[j].d === selected));
+    read.innerHTML = describe(i >= 0 ? days[i].d : null);
+    if (i >= 0) svg.setAttribute('aria-valuenow', i + 1);
+  };
+  show(hover);
+
+  const idxAt = (clientX) => {
+    const r = svg.getBoundingClientRect();
+    return Math.max(0, Math.min(n - 1, Math.floor(((clientX - r.left) / r.width) * n)));
+  };
+  let down = false;
+  let moved = false;
+  let startI = -1;
+  svg.addEventListener('pointerdown', (e) => {
+    down = true;
+    moved = false;
+    startI = idxAt(e.clientX);
+    hover = startI;
+    show(hover);
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (!down && e.pointerType !== 'mouse') return;
+    const i = idxAt(e.clientX);
+    if (i !== hover) {
+      hover = i;
+      if (down) moved = true;
+      show(hover);
+    }
+  });
+  const end = () => {
+    if (!down) return;
+    down = false;
+    const d = days[hover]?.d;
+    // Tocar de novo no dia já selecionado volta ao mês inteiro.
+    onSelect(!moved && d === selected ? null : d);
+  };
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointercancel', () => {
+    down = false;
+    show(days.findIndex((x) => x.d === selected));
+  });
+  svg.addEventListener('pointerleave', (e) => {
+    if (e.pointerType === 'mouse' && !down) show(days.findIndex((x) => x.d === selected));
+  });
+  svg.addEventListener('keydown', (e) => {
+    let i = days.findIndex((x) => x.d === selected);
+    if (e.key === 'ArrowRight') i = Math.min(n - 1, i < 0 ? 0 : i + 1);
+    else if (e.key === 'ArrowLeft') i = Math.max(0, i < 0 ? n - 1 : i - 1);
+    else if (e.key === 'Home') i = 0;
+    else if (e.key === 'End') i = n - 1;
+    else if (e.key === 'Escape' && selected) return onSelect(null);
+    else return;
+    e.preventDefault();
+    onSelect(days[i].d);
+  });
+}

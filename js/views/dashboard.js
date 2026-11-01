@@ -1,14 +1,18 @@
 import * as store from '../core/store.js';
-import { position, series, monthStats, projection, obligations, balances, cardInfo, firstDate, dueAmount } from '../core/domain.js';
+import { position, series, monthStats, projection, obligations, balances, cardInfo, firstDate, dueAmount, lateBills } from '../core/domain.js';
+import { lateSnoozed, snoozeLate, snoozeEndsIn, HOUR } from '../core/snooze.js';
+import { openLateBills } from './plan.js';
+import { app } from '../state.js';
 import { today } from '../lib/clock.js';
 import { esc, money, moneySigned, addDays, addMonths, ymOf, relDay, fmtDay, fmtMonth } from '../lib/util.js';
-import { tip, icon, countUp } from '../ui/ui.js';
+import { tip, icon, countUp, toast } from '../ui/ui.js';
 import { lineChart } from '../ui/chart.js';
 import { openPay } from './txform.js';
 
 let range = localStorage.getItem('pago.range') || '90';
 let showNet = localStorage.getItem('pago.showNet') !== '0';
 let counted = false;
+let reshow = 0;
 let mode = localStorage.getItem('pago.heroMode') === 'saldo' ? 'saldo' : 'divida';
 
 export const title = 'Início';
@@ -36,7 +40,30 @@ export function render(el) {
   const cats = [...ms.byCat.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
   const catMax = cats[0]?.[1] || 1;
 
+  // Aviso de contas atrasadas (contas recorrentes; cartão e cheque especial ficam de fora).
+  const late = lateBills(S, td);
+  const lateKeys = late.map((x) => x.key);
+  const showLate = lateKeys.length > 0 && !lateSnoozed(lateKeys);
+  clearTimeout(reshow);
+  if (lateKeys.length && !showLate && snoozeEndsIn() < 2 * HOUR) reshow = setTimeout(() => app.refresh(), snoozeEndsIn() + 1000);
+  const byBill = new Map();
+  for (const x of late) byBill.set(x.bill.name, (byBill.get(x.bill.name) || 0) + 1);
+  const lateTotal = late.reduce((a, x) => a + x.amount, 0);
+
   el.innerHTML = `
+  ${
+    showLate
+      ? `<section class="alert" role="alert">
+      <div class="alert-txt"><b>${late.length} ${late.length === 1 ? 'conta atrasada' : 'contas atrasadas'}, ${money(lateTotal)}</b>
+      <span>${esc([...byBill].map(([n, c]) => `${n} (${c} ${c === 1 ? 'mês' : 'meses'})`).join(', '))}</span></div>
+      <div class="alert-acts">
+        <button type="button" class="btn small primary" data-late-pay>Pagar agora</button>
+        <button type="button" class="btn small ghost" data-late-later>Lembre-me mais tarde</button>
+        <button type="button" class="btn small ghost" data-late-cant>Não consigo pagar agora</button>
+      </div>
+    </section>`
+      : ''
+  }
   <section class="hero">
     <div class="hero-top">
       <div class="hero-num">
@@ -186,6 +213,17 @@ export function render(el) {
       render(el);
     }),
   );
+  el.querySelector('[data-late-pay]')?.addEventListener('click', openLateBills);
+  el.querySelector('[data-late-later]')?.addEventListener('click', () => {
+    snoozeLate(HOUR, lateKeys);
+    render(el);
+    toast('Aviso adiado por uma hora');
+  });
+  el.querySelector('[data-late-cant]')?.addEventListener('click', () => {
+    snoozeLate(7 * 24 * HOUR, lateKeys);
+    render(el);
+    toast('Aviso adiado por 7 dias. Se outra conta atrasar, ele volta antes.');
+  });
   const obsById = new Map(upcoming.map((o) => [o.id, o]));
   el.querySelectorAll('[data-pay]').forEach((b) => b.addEventListener('click', () => openPay(obsById.get(b.dataset.pay))));
 

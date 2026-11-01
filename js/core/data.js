@@ -43,7 +43,18 @@ export function exportCSV(ym) {
   download(`pago-${ym}.csv`, '\ufeff' + csv, 'text/csv;charset=utf-8');
 }
 
-/* ---------- Relatório do mês (imprimível / salvar como PDF) ---------- */
+/* ---------- Relatório do mês ----------
+   Abre dentro do próprio app (sem nova janela, que travava o PWA no celular).
+   Imprimir usa a impressão do navegador só com o relatório; Baixar gera um .html independente. */
+const REPORT_CSS = `
+  .rep{font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#111;background:#fff;max-width:760px;margin:0 auto;padding:28px 24px 40px}
+  .rep h1{font-size:22px;margin:0 0 4px} .rep h2{font-size:14px;margin:28px 0 8px;border-bottom:1px solid #ddd;padding-bottom:4px}
+  .rep p.s{color:#666;margin:0 0 16px} .rep table{width:100%;border-collapse:collapse}
+  .rep td,.rep th{padding:5px 4px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+  .rep th{font-weight:600;color:#555;font-size:12px} .rep .r{text-align:right;white-space:nowrap}
+  .rep .neg{color:#b42318} .rep .pos{color:#067647} .rep small{color:#666}
+  .rep .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0 24px}`;
+
 export function openReport(ym) {
   const S = store.snapshot();
   const td = today();
@@ -57,14 +68,7 @@ export function openReport(ym) {
   const cats = [...ms.byCat.entries()].sort((x, y) => y[1] - x[1]);
   const txs = S.tx.filter((t) => t.date.startsWith(ym));
   const row = (l, v) => `<tr><td>${esc(l)}</td><td class="r">${v}</td></tr>`;
-  const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Pago, ${fmtMonth(ym)}</title>
-  <style>
-    body{font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#111;max-width:760px;margin:32px auto;padding:0 24px}
-    h1{font-size:22px;margin:0 0 4px} h2{font-size:14px;margin:28px 0 8px;border-bottom:1px solid #ddd;padding-bottom:4px}
-    p.s{color:#666;margin:0 0 16px} table{width:100%;border-collapse:collapse} td,th{padding:5px 4px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
-    th{font-weight:600;color:#555;font-size:12px} .r{text-align:right;white-space:nowrap} .neg{color:#b42318} .pos{color:#067647}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:24px} @media print{body{margin:0}}
-  </style></head><body>
+  const inner = `<article class="rep">
   <h1>${fmtMonth(ym)}</h1><p class="s">Relatório gerado em ${fmtDate(td)}${last < end ? `, parcial até ${fmtDate(last)}` : ''}.</p>
   <div class="grid">
     <div><h2>Resultado</h2><table>${row('Entradas', money(ms.income))}${row('Saídas', money(ms.expense))}${row('Resultado', `<b class="${ms.result < 0 ? 'neg' : 'pos'}">${money(ms.result)}</b>`)}</table></div>
@@ -75,11 +79,45 @@ export function openReport(ym) {
   ${obs.map((o) => `<tr><td>${fmtDate(o.date)}</td><td>${esc(o.title)}</td><td>${o.paid ? (o.dir === 'in' ? 'Recebido' : 'Pago') : o.date < td ? 'Atrasado' : 'Pendente'}</td><td class="r">${money(o.amount)}</td></tr>`).join('')}</table>
   <h2>Lançamentos (${txs.length})</h2><table><tr><th>Data</th><th>Descrição</th><th>Forma</th><th>Conta</th><th class="r">Valor</th></tr>
   ${txs.map((t) => `<tr><td>${fmtDate(t.date)}</td><td>${esc(t.desc || S.byId.get(t.categoryId)?.name || TYPE[t.type])}${t.contact ? `<br><small>${t.type === 'entrada' ? 'de' : 'para'} ${esc(t.contact)}</small>` : ''}</td><td>${esc(METHODS[t.method] || '')}</td><td>${esc(t.type === 'transf' ? `${walletName(S, t.from)} para ${walletName(S, t.to)}` : walletName(S, t.from || t.to))}</td><td class="r ${t.type === 'saida' ? 'neg' : t.type === 'entrada' ? 'pos' : ''}">${t.type === 'saida' ? '−' : ''}${money(Math.abs(t.amount))}</td></tr>`).join('')}</table>
-  <script>setTimeout(()=>print(),300)</script></body></html>`;
-  const w = window.open('', '_blank');
-  if (!w) return download(`pago-relatorio-${ym}.html`, html, 'text/html');
-  w.document.write(html);
-  w.document.close();
+  </article>`;
+
+  const standalone = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pago, ${fmtMonth(ym)}</title><style>body{margin:0;background:#fff}${REPORT_CSS}</style></head><body>${inner}</body></html>`;
+  document.getElementById('report')?.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'report';
+  wrap.setAttribute('role', 'dialog');
+  wrap.setAttribute('aria-label', `Relatório de ${fmtMonth(ym)}`);
+  wrap.innerHTML = `<style>${REPORT_CSS}</style>
+    <div class="rep-bar">
+      <button type="button" class="btn small ghost" data-close>Fechar</button>
+      <span></span>
+      <button type="button" class="btn small ghost" data-dl>Baixar</button>
+      <button type="button" class="btn small primary" data-print>Imprimir ou PDF</button>
+    </div>
+    <div class="rep-scroll">${inner}</div>`;
+  document.body.appendChild(wrap);
+  document.body.classList.add('has-report');
+  const close = () => {
+    wrap.remove();
+    document.body.classList.remove('has-report');
+    window.removeEventListener('keydown', onKey, true);
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      close();
+    }
+  };
+  window.addEventListener('keydown', onKey, true);
+  wrap.querySelector('[data-close]').onclick = close;
+  wrap.querySelector('[data-dl]').onclick = () => download(`pago-relatorio-${ym}.html`, standalone, 'text/html');
+  wrap.querySelector('[data-print]').onclick = () => {
+    try {
+      window.print();
+    } catch {
+      download(`pago-relatorio-${ym}.html`, standalone, 'text/html');
+    }
+  };
 }
 
 /* ---------- Lembretes para o calendário (.ics) ----------

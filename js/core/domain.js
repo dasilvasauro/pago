@@ -6,7 +6,7 @@
 //   - Parcelamentos e acordos   -> parcelas restantes e entrada não paga
 //   - Outras dívidas            -> contas do tipo "dívida": saldo devedor sem parcelas definidas
 //                                  (ex.: cheque especial que o banco transferiu para uma conta à parte)
-//   - Contas em atraso          -> contas recorrentes vencidas e não pagas (desde que foram cadastradas)
+//   - Contas em atraso          -> contas recorrentes vencidas e não pagas (luz, água, internet...)
 // Assim, todo lançamento do diário altera a dívida automaticamente: um salário que cai numa
 // conta negativa abate o cheque especial sem nenhum passo extra.
 import { addMonths, ymOf, clampDay, addDays, monthsBetween, splitParts, daysBetween, sum, isoOf } from '../lib/util.js';
@@ -153,23 +153,21 @@ export function coveredKeys(S, upto = '9999-12-31') {
   for (const p of S.plan) if ((p.openingDate || '') <= upto) for (const k of p.covers || []) s.add(k);
   return s;
 }
-const createdOn = (x) => (x._ca ? isoOf(new Date(x._ca)) : '0000-00-00');
 
-// Contas recorrentes vencidas e não pagas até a data. Vencimentos anteriores ao cadastro da conta
-// são ignorados: o app não sabe se foram pagos antes de você começar a usá-lo.
+// Contas recorrentes vencidas e não pagas até a data, a partir do mês de início de cada conta.
+// Meses pagos fora do app podem ser marcados como "já pago" (ajuste do mês com settled).
 export function lateBills(S, date, paid = paidKeys(S, date), covered = coveredKeys(S, date)) {
   const out = [];
   const occ = occMap(S);
   const ym = ymOf(date);
   for (const b of S.bill) {
     if (b.dir === 'in' || !b.startMonth) continue;
-    const since = createdOn(b);
     for (let m = b.startMonth; m <= ym; m = addMonths(m, 1)) {
       if (!billActive(b, m)) continue;
       const ov = occ.get(`${b.id}:${m}`);
-      if (ov?.skip) continue;
+      if (ov?.skip || ov?.settled) continue;
       const due = ov?.date || clampDay(m, b.day);
-      if (due >= date || due < since) continue;
+      if (due >= date) continue;
       const key = `b:${b.id}:${m}`;
       if (paid.has(key) || covered.has(key)) continue;
       out.push({ key, bill: b, month: m, date: due, amount: ov?.amount ?? (b.amount || 0) });
@@ -350,7 +348,8 @@ export function obligations(S, fromYM, toYM, today) {
         edited: !!ov,
         occ: ov || null,
         amount: sum(parts, (x) => x.amount),
-        paid: parts.every((x) => paid.has(x.key) || covered.has(x.key)),
+        paid: !!ov?.settled || parts.every((x) => paid.has(x.key) || covered.has(x.key)),
+        settled: !!ov?.settled && !paid.has(key),
         reneg: parts.some((x) => covered.has(x.key) && !paid.has(x.key)),
         tx: paid.get(key) || paid.get(parts[1]?.key),
         src: b,

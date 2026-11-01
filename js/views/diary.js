@@ -5,6 +5,8 @@ import { esc, money, moneySigned, ymOf, addMonths, fmtMonth, fmtDayLong, relDay 
 import { icon, tip, opt } from '../ui/ui.js';
 import { openTx, txRow, walletOptions, decodeWallet } from './txform.js';
 import { METHODS } from '../core/methods.js';
+import { dayBars } from '../ui/chart.js';
+import { daysInMonth, pad, fmtDateHuman } from '../lib/util.js';
 
 export const title = 'Diário';
 
@@ -13,12 +15,17 @@ let base = null;
 let filter = 'all';
 let wallet = '';
 let q = '';
+let day = null; // dia selecionado no gráfico
 
 export function render(el) {
   const S = store.snapshot();
   const td = today();
   // Acompanha a virada do mês: se a tela estava no mês corrente, passa para o novo.
-  if (!month || (month === base && base !== ymOf(td))) month = ymOf(td);
+  if (!month || (month === base && base !== ymOf(td))) {
+    month = ymOf(td);
+    day = null;
+  }
+  if (day && !day.startsWith(month)) day = null;
   base = ymOf(td);
   const ms = monthStats(S, month);
   const w = wallet ? decodeWallet(S, wallet) : null;
@@ -36,8 +43,22 @@ export function render(el) {
     .filter((t) => !ql || [t.desc, t.contact, S.byId.get(t.categoryId)?.name, METHODS[t.method]].some((x) => (x || '').toLowerCase().includes(ql)))
     .reverse();
 
+  // Série diária para o gráfico (respeita os filtros, não o dia selecionado).
+  const primary = filter === 'entrada' ? 'entrada' : filter === 'transf' ? 'transf' : 'saida';
+  const daily = Array.from({ length: daysInMonth(month) }, (_, i) => ({ d: `${month}-${pad(i + 1)}`, v: 0, inc: 0, out: 0, n: 0 }));
+  for (const t of list) {
+    const x = daily[Number(t.date.slice(8)) - 1];
+    if (!x) continue;
+    x.n++;
+    if (t.type === 'entrada') x.inc += t.amount;
+    if (t.type === 'saida') x.out += t.amount;
+    if (t.type === primary || (primary === 'transf' && t.type === 'ajuste')) x.v += Math.abs(t.amount);
+  }
+  if (primary === 'entrada') daily.forEach((x) => (x.inc = 0));
+  const shown = day ? list.filter((t) => t.date === day) : list;
+
   const days = new Map();
-  for (const t of list) (days.get(t.date) || days.set(t.date, []).get(t.date)).push(t);
+  for (const t of shown) (days.get(t.date) || days.set(t.date, []).get(t.date)).push(t);
   const archived = S.archive.some((a) => a.month === month);
 
   el.innerHTML = `
@@ -72,6 +93,10 @@ export function render(el) {
       <input type="search" data-q placeholder="Buscar" value="${esc(q)}" aria-label="Buscar no diário">
     </div>
   </div>
+  <section class="day-chart${day ? ' has-day' : ''}">
+    <div data-dc></div>
+    ${day ? `<div class="dc-day"><span>Mostrando só ${fmtDateHuman(day)}</span><button type="button" class="btn small ghost" data-allmonth>Ver o mês inteiro</button></div>` : ''}
+  </section>
   ${archived ? `<p class="note">${icon('archive')}Mês arquivado. Os lançamentos ficam disponíveis para consulta e relatórios.${tip('Meses antigos são compactados para economizar espaço na nuvem. Veja Ajustes, Dados.')}</p>` : ''}
   ${
     days.size
@@ -84,12 +109,40 @@ export function render(el) {
             </section>`;
           })
           .join('')
-      : `<div class="empty-block">${icon('diary')}<p>${month === ymOf(td) ? 'Nenhum lançamento neste mês ainda. Use o botão + para registrar o primeiro.' : 'Nenhum lançamento encontrado.'}</p></div>`
+      : day
+        ? `<div class="empty-block">${icon('diary')}<p>Nenhum lançamento em ${fmtDateHuman(day)}.</p><button type="button" class="btn small" data-addday>${icon('plus')}Registrar neste dia</button></div>`
+        : `<div class="empty-block">${icon('diary')}<p>${month === ymOf(td) ? 'Nenhum lançamento neste mês ainda. Use o botão + para registrar o primeiro.' : 'Nenhum lançamento encontrado.'}</p></div>`
   }`;
 
+  const chartHost = el.querySelector('[data-dc]');
+  const label = { saida: 'Saídas', entrada: 'Entradas', transf: 'Transferências' }[primary];
+  dayBars(chartHost, {
+    days: daily,
+    selected: day,
+    today: td,
+    describe: (d) => {
+      if (!d) return `<span class="dc-hint">Toque ou arraste nas barras para ver um dia</span>`;
+      const x = daily[Number(d.slice(8)) - 1];
+      const parts = [`${label} ${money(x.v)}`];
+      if (primary === 'saida' && x.inc) parts.push(`Entradas ${money(x.inc)}`);
+      return `<b>${fmtDayLong(d)}</b><span>${parts.join(', ')}${x.n ? '' : ', sem lançamentos'}</span>`;
+    },
+    onSelect: (d) => {
+      const hadFocus = document.activeElement?.closest?.('[data-dc]');
+      day = d;
+      render(el);
+      if (hadFocus) el.querySelector('[data-dc] svg')?.focus({ preventScroll: true });
+    },
+  });
+  el.querySelector('[data-allmonth]')?.addEventListener('click', () => {
+    day = null;
+    render(el);
+  });
+  el.querySelector('[data-addday]')?.addEventListener('click', () => openTx({ date: day }));
   el.querySelectorAll('[data-m]').forEach((b) =>
     b.addEventListener('click', () => {
       month = addMonths(month, Number(b.dataset.m));
+      day = null;
       render(el);
     }),
   );

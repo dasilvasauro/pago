@@ -8,6 +8,7 @@ import * as store from './store.js';
 import { obligations } from './domain.js';
 import { today } from '../lib/clock.js';
 import { money, addDays, ymOf, addMonths } from '../lib/util.js';
+import { lateSnoozed } from './snooze.js';
 
 const KEY = 'pago.notify';
 export const settings = () => JSON.parse(localStorage.getItem(KEY) || '{"on":false,"lead":1}');
@@ -60,7 +61,10 @@ export async function check() {
   if (!s.on || !supported() || Notification.permission !== 'granted') return;
   const td = today();
   const seen = JSON.parse(localStorage.getItem(KEY + '.seen') || '{}');
-  const list = upcoming(s.lead).filter((o) => seen[o.id] !== td);
+  let list = upcoming(s.lead).filter((o) => seen[o.id] !== td);
+  // "Não consigo pagar agora" também silencia as notificações das contas atrasadas.
+  const lateKeys = list.filter((o) => o.kind === 'bill' && o.date < td).map((o) => o.id);
+  if (lateKeys.length && lateSnoozed(lateKeys)) list = list.filter((o) => !lateKeys.includes(o.id));
   if (!list.length) return;
   const reg = await navigator.serviceWorker.ready;
   const late = list.filter((o) => o.date < td);
