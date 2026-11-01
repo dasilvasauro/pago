@@ -28,6 +28,7 @@ export function walletOptions(S, mode, selected) {
     for (const a of liveA.filter((a) => a.institutionId === inst.id)) {
       if (a.kind === 'investimento' && mode === 'out') continue;
       if (a.kind === 'divida' && mode !== 'to' && mode !== 'from') continue;
+      if (a.kind === 'cofrinho' && mode === 'out') continue;
       items.push([`a:${a.id}`, a.name]);
     }
     for (const c of liveC.filter((c) => c.institutionId === inst.id)) {

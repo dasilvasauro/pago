@@ -45,7 +45,7 @@ export function render(el) {
             <button type="button" role="radio" aria-checked="${!isSaldo}" data-mode="divida" class="${!isSaldo ? 'on' : ''}">Dívida total</button>
             <button type="button" role="radio" aria-checked="${isSaldo}" data-mode="saldo" class="${isSaldo ? 'on' : ''}">Saldo total</button>
           </div>
-          ${tip(isSaldo ? 'Soma dos valores positivos nas contas correntes, poupanças e em dinheiro. Contas no negativo não entram aqui: elas aparecem como cheque especial na dívida. Vouchers e investimentos ficam à parte.' : 'Soma do cheque especial em uso, de tudo o que está nos cartões de crédito (inclusive parcelas futuras), do que falta pagar em acordos e parcelamentos, das outras dívidas e das contas recorrentes em atraso. Atualiza a cada lançamento.')}
+          ${tip(isSaldo ? 'Soma dos valores positivos nas contas correntes, poupanças e em dinheiro. Contas no negativo não entram aqui: elas aparecem como cheque especial na dívida. Vouchers, cofrinhos e investimentos ficam à parte.' : 'Soma do cheque especial em uso, de tudo o que está nos cartões de crédito (inclusive parcelas futuras), do que falta pagar em acordos e parcelamentos, das outras dívidas e das contas recorrentes em atraso. Atualiza a cada lançamento.')}
         </div>
         <p class="big" data-big>${money(value)}</p>
         <p class="delta ${delta === 0 ? '' : good ? 'good' : 'bad'}">${delta === 0 ? 'Sem variação' : `${delta < 0 ? 'Caiu' : 'Subiu'} ${money(Math.abs(delta))}`} nos últimos 30 dias</p>
@@ -56,7 +56,8 @@ export function render(el) {
             ? `<div><dt>Contas bancárias</dt><dd>${money(pos.bank)}</dd></div>
         <div><dt>Dinheiro</dt><dd>${money(pos.cash)}</dd></div>
         <div><dt>Vouchers</dt><dd>${money(pos.vouchers)}</dd></div>
-        <div><dt>Investimentos</dt><dd>${money(pos.invested)}</dd></div>`
+        <div><dt>Investimentos</dt><dd>${money(pos.invested)}</dd></div>
+        ${pos.savings ? `<div><dt>Cofrinhos</dt><dd>${money(pos.savings)}</dd></div>` : ''}`
             : `<div><dt>Cheque especial</dt><dd>${money(pos.overdraft)}</dd></div>
         <div><dt>Cartões</dt><dd>${money(pos.cards)}</dd></div>
         <div><dt>Acordos e parcelamentos</dt><dd>${money(pos.plans)}</dd></div>
@@ -112,7 +113,7 @@ export function render(el) {
       <header class="panel-head"><h3>Contas e cartões</h3><a href="#carteira" class="link">Carteira</a></header>
       <ul class="mini-list">
         ${S.acct
-          .filter((a) => !a.archived && a.kind !== 'investimento' && a.kind !== 'divida')
+          .filter((a) => !a.archived && !['investimento', 'divida', 'cofrinho'].includes(a.kind))
           .map((a) => {
             const b = bal.get('a:' + a.id) || 0;
             const lim = a.overdraftLimit || 0;

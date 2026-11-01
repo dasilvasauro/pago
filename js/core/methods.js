@@ -43,13 +43,14 @@ export function methodChoices(S, type, fromV, toV) {
     const k = kindOf(S, toV);
     if (!k || k === 'credit') return [];
     if (k === 'voucher') return ['voucher'];
+    if (k === 'cofrinho') return [];
     if (k === 'carteira') return ['dinheiro'];
     return ['pix', 'ted', 'dinheiro', 'outro'];
   }
   if (type === 'transf') {
     const kf = kindOf(S, fromV);
     const kt = kindOf(S, toV);
-    if (!kf || kf === 'carteira' || kf === 'credit' || kf === 'divida') return [];
+    if (!kf || kf === 'carteira' || kf === 'credit' || kf === 'divida' || kf === 'cofrinho' || kt === 'cofrinho') return [];
     if (kt === 'credit' || kt === 'divida') return ['pix', 'boleto', 'auto', 'outro'];
     return ['pix', 'ted', 'outro'];
   }

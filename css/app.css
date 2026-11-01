@@ -651,6 +651,41 @@ body.has-sheet { overflow: hidden; }
 .scan-bottom { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; padding: 0 24px calc(env(safe-area-inset-bottom, 0px) + 28px); }
 .scan-bottom .btn { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.25); backdrop-filter: blur(8px); }
 
+/* ---------- Ajuste de mês e cofrinhos ---------- */
+.ob-title { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; font-size: 14.5px; font-weight: 700; text-align: left; }
+.ob-title:hover { text-decoration: underline; text-decoration-color: var(--dim); text-underline-offset: 3px; }
+.ob-title .ic.sm { opacity: 0.45; }
+.ob-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.ob-list.skipped { margin-top: 4px; border-top: 1px dashed var(--line); }
+.ob-list.skipped li { opacity: 0.6; }
+.piggies { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.piggy { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--surface); text-align: left; transition: border-color 0.15s; }
+.piggy:hover { border-color: var(--dim); }
+.piggy-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.piggy-top b { font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.piggy-pct { font-weight: 800; font-size: 15px; }
+.piggy-pct.done { color: var(--pos); font-size: 12.5px; }
+.piggy-inst { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.piggy-inst i { width: 8px; height: 8px; border-radius: 3px; background: var(--c); }
+.piggy .bar { height: 8px; margin: 4px 0 2px; }
+.bar.done i { background: var(--pos); }
+.piggy-val { font-size: 13px; color: var(--muted); }
+.piggy-val b { color: var(--text); font-size: 15px; }
+.piggy-detail { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; margin-bottom: 12px; }
+.ring { position: relative; width: 132px; height: 132px; flex: none; display: grid; place-items: center; }
+.ring::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--g1) 0%, var(--g2) calc(var(--p) * 1%), var(--surface-3) calc(var(--p) * 1%)); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 12px), #000 calc(100% - 11px)); mask: radial-gradient(farthest-side, transparent calc(100% - 12px), #000 calc(100% - 11px)); }
+.ring span { position: relative; display: grid; justify-items: center; line-height: 1.1; }
+.ring b { font-size: 28px; letter-spacing: -0.02em; }
+.ring small { font-size: 12px; color: var(--muted); font-weight: 600; }
+.piggy-nums { display: grid; gap: 8px; flex: 1; min-width: 180px; }
+.piggy-nums div { display: flex; justify-content: space-between; gap: 10px; }
+.piggy-nums span { color: var(--muted); font-size: 14px; font-weight: 600; }
+.piggy-nums b { font-size: 16px; }
+.idle { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 8px; border-radius: 12px; background: var(--surface-2); font-size: 14px; font-weight: 600; }
+.idle .ic { color: var(--g2); }
+.idle.warn { background: color-mix(in srgb, var(--warn) 12%, var(--surface-2)); }
+.idle.warn .ic { color: var(--warn); }
+
 /* ---------- Seletores personalizados ---------- */
 .pick-native { position: absolute !important; width: 1px !important; height: 1px !important; opacity: 0; pointer-events: none; clip-path: inset(50%); }
 .pick {

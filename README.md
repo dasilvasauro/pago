@@ -220,6 +220,25 @@ Cada lançamento do diário altera saldos e dívida na hora. Um salário que cai
 Excluir o acordo desfaz tudo isso.
 - **Vouchers e investimentos:** aparecem à parte, abaixo do valor.
 
+**Ajustar um mês de uma conta recorrente.** Em Planejar, toque no nome de uma conta recorrente ainda não paga, em qualquer mês, passado ou futuro. Dá para:
+
+- **Mudar o valor só daquele mês:** por exemplo, a conta de luz de agosto veio R$ 312,70.
+- **Mudar o vencimento.**
+- **Marcar "Não haverá cobrança neste mês".** Fica uma linha com Desfazer.
+- **"Usar este valor daqui em diante":** muda o valor padrão. Os meses anteriores ainda não pagos mantêm o valor antigo.
+
+Os ajustes valem para o calendário, as contas em atraso, a dívida total, a projeção e a renegociação.
+
+**Cofrinhos.** Ficam em Carteira, seção Cofrinhos. Cada um tem:
+
+- **Instituição e meta:** a instituição é obrigatória; a data para atingir é opcional.
+- **Progresso:** em porcentagem e em valor.
+- **Detalhe:** mostra há quantos dias o cofrinho está sem receber nenhum valor e, com data definida, quanto guardar por mês.
+- **Movimentações:**
+  - **Guardar e Resgatar:** são transferências entre a conta e o cofrinho, por isso não contam como gasto.
+  - **Rendimentos:** entram em Atualizar saldo e não contam como depósito.
+- **Nos totais:** o valor dos cofrinhos entra no patrimônio, à parte do saldo total.
+
 **Pagar uma fatura** é uma transferência da conta para o cartão de crédito. Ela não conta como gasto, porque a compra já contou quando foi feita.
 
 **Resumo do dia.** Ao abrir o app num novo dia aparece o resumo do dia anterior. Se você passou dias sem abrir, o resumo cobre todo o período: variação da dívida, entradas, saídas, dias sem registro e o que ficou pendente.

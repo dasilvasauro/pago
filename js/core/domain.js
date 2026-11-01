@@ -17,6 +17,7 @@ export const ACCOUNT_KINDS = {
   carteira: 'Dinheiro',
   voucher: 'Voucher',
   investimento: 'Investimento',
+  cofrinho: 'Cofrinho',
   divida: 'Dívida',
 };
 export const VOUCHER_KINDS = { alimentacao: 'Alimentação', refeicao: 'Refeição', multi: 'Multibenefício', outro: 'Outro' };
@@ -95,6 +96,43 @@ export function paidKeys(S, upto = '9999-12-31') {
   return m;
 }
 export const downKey = (p) => `p:${p.id}:entrada`;
+
+// Ajustes de um mês específico de uma conta recorrente: valor, data ou "sem cobrança".
+export const occId = (billId, ym) => `oc_${billId}_${ym}`;
+export function occMap(S) {
+  const m = new Map();
+  for (const o of S.occ || []) m.set(`${o.billId}:${o.month}`, o);
+  return m;
+}
+
+/* ---------- Cofrinhos ----------
+   Conta do tipo "cofrinho" com meta. Depósitos são transferências (ou entradas) para ela;
+   rendimentos entram em Atualizar saldo e não contam como depósito. */
+export function piggyInfo(S, a, today, bal = balances(S, today)) {
+  const balance = Math.max(0, bal.get('a:' + a.id) || 0);
+  const goal = a.goal || 0;
+  let last = null;
+  for (const t of S.tx) if ((t.type === 'transf' || t.type === 'entrada') && t.to?.k === 'a' && t.to.id === a.id && t.date <= today && (!last || t.date > last)) last = t.date;
+  const since = last || a.openingDate || today;
+  const remaining = Math.max(0, goal - balance);
+  let perMonth = 0;
+  let monthsLeft = null;
+  if (a.targetDate && remaining > 0) {
+    monthsLeft = monthsBetween(ymOf(today), ymOf(a.targetDate));
+    if (monthsLeft >= 0) perMonth = Math.ceil(remaining / Math.max(1, monthsLeft + (a.targetDate.slice(8) >= today.slice(8) ? 1 : 0)));
+  }
+  return {
+    balance,
+    goal,
+    pct: goal ? Math.min(100, (balance / goal) * 100) : 0,
+    remaining,
+    done: goal > 0 && balance >= goal,
+    lastDeposit: last,
+    daysWithout: Math.max(0, daysBetween(since, today)),
+    perMonth,
+    monthsLeft,
+  };
+}
 export function planStatus(p, paid) {
   let count = p.paidBefore || 0;
   for (let k = (p.paidBefore || 0) + 1; k <= p.n; k++) if (paid.has(`p:${p.id}:${planMonthOf(p, k)}`)) count++;
@@ -121,17 +159,20 @@ const createdOn = (x) => (x._ca ? isoOf(new Date(x._ca)) : '0000-00-00');
 // são ignorados: o app não sabe se foram pagos antes de você começar a usá-lo.
 export function lateBills(S, date, paid = paidKeys(S, date), covered = coveredKeys(S, date)) {
   const out = [];
+  const occ = occMap(S);
   const ym = ymOf(date);
   for (const b of S.bill) {
     if (b.dir === 'in' || !b.startMonth) continue;
     const since = createdOn(b);
     for (let m = b.startMonth; m <= ym; m = addMonths(m, 1)) {
       if (!billActive(b, m)) continue;
-      const due = clampDay(m, b.day);
+      const ov = occ.get(`${b.id}:${m}`);
+      if (ov?.skip) continue;
+      const due = ov?.date || clampDay(m, b.day);
       if (due >= date || due < since) continue;
       const key = `b:${b.id}:${m}`;
       if (paid.has(key) || covered.has(key)) continue;
-      out.push({ key, bill: b, month: m, date: due, amount: b.amount || 0 });
+      out.push({ key, bill: b, month: m, date: due, amount: ov?.amount ?? (b.amount || 0) });
     }
   }
   return out;
@@ -210,7 +251,7 @@ export function cardInfo(S, card, today, bal = balances(S, today)) {
 export function position(S, date) {
   const bal = balances(S, date);
   const paid = paidKeys(S, date);
-  const p = { overdraft: 0, cards: 0, plans: 0, other: 0, late: 0, liquid: 0, bank: 0, cash: 0, invested: 0, vouchers: 0, credit: 0 };
+  const p = { overdraft: 0, cards: 0, plans: 0, other: 0, late: 0, liquid: 0, bank: 0, cash: 0, invested: 0, savings: 0, vouchers: 0, credit: 0 };
   for (const a of S.acct) {
     if (a.openingDate > date) continue;
     const b = bal.get('a:' + a.id) || 0;
@@ -218,6 +259,7 @@ export function position(S, date) {
       if (b < 0) p.other -= b;
       else p.credit += b;
     } else if (a.kind === 'investimento') p.invested += b;
+    else if (a.kind === 'cofrinho') p.savings += Math.max(0, b);
     else if (a.kind === 'voucher') p.vouchers += Math.max(0, b);
     else if (b < 0) p.overdraft -= b;
     else {
@@ -238,7 +280,7 @@ export function position(S, date) {
   }
   p.late = sum(lateBills(S, date, paid), (x) => x.amount);
   p.debt = p.overdraft + p.cards + p.plans + p.other + p.late;
-  p.assets = p.liquid + p.invested + p.vouchers + p.credit;
+  p.assets = p.liquid + p.invested + p.savings + p.vouchers + p.credit;
   p.net = p.assets - p.debt;
   return p;
 }
@@ -273,6 +315,7 @@ const billActive = (b, m) => b.active !== false && b.startMonth <= m && (!b.endM
 export function obligations(S, fromYM, toYM, today) {
   const paid = paidKeys(S);
   const covered = coveredKeys(S);
+  const occ = occMap(S);
   const out = [];
   for (const p of S.plan) {
     if (!(p.down > 0) || !p.downDate) continue;
@@ -285,8 +328,10 @@ export function obligations(S, fromYM, toYM, today) {
     const merged = new Set();
     for (const b of S.bill) {
       if (!billActive(b, m)) continue;
+      const ov = occ.get(`${b.id}:${m}`);
+      if (ov?.skip) continue; // sem cobrança neste mês (parcelas vinculadas seguem separadas)
       const key = `b:${b.id}:${m}`;
-      const parts = [{ key, label: b.variable ? 'Valor estimado' : 'Mensal', amount: b.amount || 0 }];
+      const parts = [{ key, label: ov && ov.amount != null ? 'Valor ajustado' : b.variable ? 'Valor estimado' : 'Mensal', amount: ov?.amount ?? (b.amount || 0) }];
       for (const p of S.plan) {
         if (p.billId !== b.id) continue;
         const k = planParcelIn(p, m);
@@ -299,9 +344,11 @@ export function obligations(S, fromYM, toYM, today) {
         kind: 'bill',
         dir: b.dir || 'out',
         title: b.name,
-        date: clampDay(m, b.day),
+        date: ov?.date || clampDay(m, b.day),
         month: m,
         parts,
+        edited: !!ov,
+        occ: ov || null,
         amount: sum(parts, (x) => x.amount),
         paid: parts.every((x) => paid.has(x.key) || covered.has(x.key)),
         reneg: parts.some((x) => covered.has(x.key) && !paid.has(x.key)),

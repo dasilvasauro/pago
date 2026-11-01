@@ -1,7 +1,7 @@
 import * as store from '../core/store.js';
-import { obligations, dueAmount, planStatus, paidKeys, PLAN_KINDS, planMonthOf, lateBills, balances, cardInfo, walletName } from '../core/domain.js';
+import { obligations, dueAmount, planStatus, paidKeys, PLAN_KINDS, planMonthOf, lateBills, balances, cardInfo, walletName, occId, occMap } from '../core/domain.js';
 import { today } from '../lib/clock.js';
-import { esc, money, ymOf, addMonths, fmtMonth, fmtMonthShort, relDay, sum, fmtDay } from '../lib/util.js';
+import { esc, money, ymOf, addMonths, fmtMonth, fmtMonthShort, relDay, sum, fmtDay, clampDay } from '../lib/util.js';
 import { icon, tip, sheet, moneyInput, readMoney, opt, seg, field, toast, confirmDialog } from '../ui/ui.js';
 import { openPay, walletOptions, decodeWallet, encodeWallet } from './txform.js';
 import { METHODS, BILL_METHODS } from '../core/methods.js';
@@ -43,7 +43,7 @@ export function render(el) {
   </section>
 
   <section class="block">
-    <header class="block-head"><h3>Calendário do mês</h3>${tip('Toque em Pagar ou Receber para registrar no diário. O lançamento já sai com valor, conta e categoria preenchidos.')}</header>
+    <header class="block-head"><h3>Calendário do mês</h3>${tip('Toque em Pagar ou Receber para registrar no diário, com valor, conta e categoria preenchidos. Toque no nome de uma conta recorrente para ajustar o valor ou a data só daquele mês, antes de pagar.')}</header>
     ${
       obs.length
         ? `<ul class="ob-list">${obs
@@ -52,9 +52,9 @@ export function render(el) {
               const state = o.reneg ? `<span class="pill">${icon('swap')}Renegociada</span>` : o.paid ? `<span class="pill ok">${icon('check')}${o.dir === 'in' ? 'Recebido' : 'Pago'}</span>` : late ? `<span class="pill late">Atrasado</span>` : `<span class="pill">${relDay(o.date, td)}</span>`;
               return `<li class="${o.paid ? 'done' : ''}">
                 <div class="ob-date"><b>${o.date.slice(8)}</b><span>${fmtDay(o.date).split(' ')[1]}</span></div>
-                <div class="ob-main"><b>${esc(o.title)}</b>
+                <div class="ob-main">${o.kind === 'bill' && !o.paid ? `<button type="button" class="ob-title" data-occ="${esc(o.id)}" aria-label="Ajustar ${esc(o.title)} deste mês">${esc(o.title)}${icon('edit', 'sm')}</button>` : `<b>${esc(o.title)}</b>`}
                   ${o.parts.length > 1 ? `<span>${o.parts.map((p) => `${esc(p.label)} ${money(p.amount)}`).join(' + ')}</span>` : o.kind === 'invoice' ? `<span>${o.partial ? `Pago ${money(o.amount - o.remaining)} de ${money(o.amount)}` : 'Fatura do cartão'}</span>` : o.kind === 'plan' ? `<span>${esc(o.parts[0].label)}</span>` : o.src.variable ? '<span>Valor variável</span>' : ''}
-                  ${state}
+                  <span class="ob-pills">${state}${o.edited ? '<span class="pill">Ajustado</span>' : ''}</span>
                 </div>
                 <div class="ob-side"><span class="amt ${o.dir === 'in' ? 'pos' : ''}">${money(o.kind === 'invoice' && !o.paid ? o.remaining : o.amount)}</span>
                   ${o.reneg ? '' : `<button type="button" class="btn small ${o.paid ? 'ghost' : ''}" data-ob="${esc(o.id)}">${o.paid ? 'Ver' : o.dir === 'in' ? 'Receber' : 'Pagar'}</button>`}</div>
@@ -63,6 +63,14 @@ export function render(el) {
             .join('')}</ul>`
         : `<p class="empty">Nenhum compromisso neste mês. Cadastre contas fixas e parcelamentos abaixo.</p>`
     }
+    ${(() => {
+      const skipped = S.occ.filter((x) => x.month === month && x.skip && S.byId.get(x.billId));
+      return skipped.length
+        ? `<ul class="ob-list skipped">${skipped
+            .map((x) => `<li><div class="ob-date"><b>—</b></div><div class="ob-main"><b>${esc(S.byId.get(x.billId).name)}</b><span>Sem cobrança neste mês</span></div><div class="ob-side"><button type="button" class="btn small ghost" data-unskip="${x.id}">Desfazer</button></div></li>`)
+            .join('')}</ul>`
+        : '';
+    })()}
   </section>
 
   <div class="two-col">
@@ -107,6 +115,13 @@ export function render(el) {
   );
   const byId = new Map(obs.map((o) => [o.id, o]));
   el.querySelectorAll('[data-ob]').forEach((b) => b.addEventListener('click', () => openPay(byId.get(b.dataset.ob))));
+  el.querySelectorAll('[data-occ]').forEach((b) => b.addEventListener('click', () => openOccurrence(byId.get(b.dataset.occ))));
+  el.querySelectorAll('[data-unskip]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      await store.remove(b.dataset.unskip);
+      toast('Cobrança restaurada');
+    }),
+  );
   el.querySelector('[data-new-bill]').addEventListener('click', () => openBill());
   el.querySelector('[data-new-plan]').addEventListener('click', () => openPlan());
   el.querySelector('[data-reneg]').addEventListener('click', () => openRenegotiate());
@@ -369,6 +384,70 @@ export function openRenegotiate(pre = {}) {
         const name = first.type === 'ob' ? `Acordo ${first.label.split(' de ')[0].toLowerCase()}` : first.type === 'manual' ? 'Acordo' : `Acordo ${first.label}`;
         close();
         setTimeout(() => openPlan(null, { sources, original, name }), 240);
+      };
+    },
+  });
+}
+
+/* ---------- Ajustar um mês de uma conta recorrente ----------
+   Guarda um registro próprio para aquele mês (valor, data ou "sem cobrança"), sem mexer nos outros. */
+export function openOccurrence(o) {
+  const S = store.snapshot();
+  const b = o.src;
+  const id = occId(b.id, o.month);
+  const cur = o.occ || {};
+  const base = o.parts[0];
+  const extra = o.parts.slice(1);
+  const defDate = clampDay(o.month, b.day);
+  sheet({
+    title: `${b.name} de ${fmtMonth(o.month).toLowerCase()}`,
+    body: `<form class="form" data-f>
+      <p class="sheet-text">Vale só para este mês. Os outros meses continuam com ${money(b.amount)}${b.variable ? ' (estimado)' : ''}, dia ${b.day}.</p>
+      <span class="field-label">${b.variable ? 'Valor da conta neste mês' : 'Valor neste mês'}</span>
+      ${moneyInput('amount', base.amount, { big: true, autofocus: true })}
+      ${extra.length ? `<ul class="parts">${extra.map((p) => `<li><span>${esc(p.label)} <small>vem junto, valor do parcelamento</small></span><span>${money(p.amount)}</span></li>`).join('')}</ul>` : ''}
+      <label class="field"><span>Vencimento</span><input name="date" type="date" value="${o.date}" required></label>
+      <label class="check"><input type="checkbox" name="skip"><span>Não haverá cobrança neste mês</span></label>
+      <label class="check"><input type="checkbox" name="forward"><span>Usar este valor daqui em diante</span>${tip('Muda o valor padrão da conta a partir deste mês. Meses anteriores ainda não pagos mantêm o valor que tinham.')}</label>
+      <div class="sheet-actions">${o.edited ? `<button type="button" class="btn ghost" data-reset>${icon('refresh')}Restaurar padrão</button>` : '<span></span>'}<button class="btn primary">Salvar</button></div>
+    </form>`,
+    onMount(el, close) {
+      const f = el.querySelector('[data-f]');
+      f.skip.addEventListener('change', () => {
+        f.forward.disabled = f.skip.checked;
+        if (f.skip.checked) f.forward.checked = false;
+      });
+      el.querySelector('[data-reset]')?.addEventListener('click', async () => {
+        await store.remove(id);
+        close();
+        toast('Mês voltou ao valor padrão');
+      });
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        if (f.skip.checked) {
+          await store.save('occ', { billId: b.id, month: o.month, skip: true }, id);
+          close();
+          return toast('Mês marcado sem cobrança');
+        }
+        const amount = Math.abs(readMoney(f.amount));
+        const date = f.date.value !== defDate ? f.date.value : '';
+        if (f.forward.checked) {
+          // Congela os meses anteriores ainda não pagos com o valor antigo antes de mudar o padrão.
+          const S2 = store.snapshot();
+          const ov = occMap(S2);
+          const unpaid = obligations(S2, b.startMonth, addMonths(o.month, -1), today()).filter((x) => x.kind === 'bill' && x.src.id === b.id && !x.paid);
+          for (const x of unpaid) if (!ov.has(`${b.id}:${x.month}`)) await store.save('occ', { billId: b.id, month: x.month, amount: b.amount }, occId(b.id, x.month));
+          await store.save('bill', { ...b, amount }, b.id);
+          if (date) await store.save('occ', { billId: b.id, month: o.month, date }, id);
+          else if (o.occ) await store.remove(id);
+          close();
+          return toast('Novo valor aplicado daqui em diante');
+        }
+        if (amount === (b.amount || 0) && !date) {
+          if (o.occ) await store.remove(id);
+        } else await store.save('occ', { billId: b.id, month: o.month, amount, ...(date ? { date } : {}) }, id);
+        close();
+        toast('Mês ajustado');
       };
     },
   });

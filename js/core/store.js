@@ -200,7 +200,7 @@ export const stats = () => {
 
 const view = (r) => ({ id: r.id, ...r.data, _by: r.by, _cb: r.cb, _ca: r.ca, _u: r.u });
 
-const TYPES = ['inst', 'acct', 'card', 'cat', 'tx', 'bill', 'plan', 'member', 'archive'];
+const TYPES = ['inst', 'acct', 'card', 'cat', 'tx', 'bill', 'plan', 'member', 'archive', 'occ'];
 
 // Fotografia imutável do estado, reconstruída só quando algo muda.
 export function snapshot() {

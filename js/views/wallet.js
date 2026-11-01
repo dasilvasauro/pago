@@ -1,7 +1,7 @@
 import * as store from '../core/store.js';
-import { balances, cardInfo, position, obligations, ACCOUNT_KINDS, VOUCHER_KINDS, INVEST_KINDS } from '../core/domain.js';
+import { balances, cardInfo, position, obligations, piggyInfo, ACCOUNT_KINDS, VOUCHER_KINDS, INVEST_KINDS } from '../core/domain.js';
 import { today } from '../lib/clock.js';
-import { esc, money, fmtDay, fmtMonth, fmtDate } from '../lib/util.js';
+import { esc, money, fmtDay, fmtMonth, fmtDate, fmtDateHuman, fmtMonthShort, addMonths, ymOf } from '../lib/util.js';
 import { icon, tip, sheet, moneyInput, readMoney, opt, seg, field, toast, confirmDialog, colorPicker, COLORS, bindMoney } from '../ui/ui.js';
 import { txRow, openTx, openPay, walletOptions } from './txform.js';
 import { openRenegotiate } from './plan.js';
@@ -56,7 +56,8 @@ export function render(el) {
       <span class="amt ${info.outstanding > 0 ? 'neg' : ''}">${money(info.outstanding)}</span></button></li>`;
   };
 
-  const loose = accts.filter((a) => !a.institutionId && a.kind !== 'investimento' && a.kind !== 'divida');
+  const loose = accts.filter((a) => !a.institutionId && !['investimento', 'divida', 'cofrinho'].includes(a.kind));
+  const piggies = accts.filter((a) => a.kind === 'cofrinho');
   const inv = accts.filter((a) => a.kind === 'investimento');
   const debts = accts.filter((a) => a.kind === 'divida');
 
@@ -68,6 +69,7 @@ export function render(el) {
     ${pos.other ? `<div><span>Outras dívidas</span><b class="neg">${money(pos.other)}</b></div>` : ''}
     <div><span>Vouchers</span><b>${money(pos.vouchers)}</b></div>
     <div><span>Investido</span><b>${money(pos.invested)}</b></div>
+    ${piggies.length ? `<div><span>Cofrinhos</span><b>${money(pos.savings)}</b></div>` : ''}
   </div>
 
   <section class="block">
@@ -75,7 +77,7 @@ export function render(el) {
     ${S.inst.length ? '' : `<p class="empty">Cadastre seu primeiro banco para adicionar contas e cartões.</p>`}
     ${S.inst
       .map((i) => {
-        const ia = accts.filter((a) => a.institutionId === i.id && a.kind !== 'divida');
+        const ia = accts.filter((a) => a.institutionId === i.id && a.kind !== 'divida' && a.kind !== 'cofrinho');
         const ic = cards.filter((c) => c.institutionId === i.id);
         return `<article class="inst" style="--c:${i.color || COLORS[0]}">
           <header><button type="button" class="inst-name" data-inst="${i.id}"><i></i>${esc(i.name)}${icon('edit', 'sm')}</button>
@@ -101,10 +103,32 @@ export function render(el) {
       ${inv.length ? `<ul class="rows">${inv.map(acctRow).join('')}</ul>` : `<p class="empty">Nenhum investimento registrado.</p>`}
     </section>
   </div>
+
+  <section class="block">
+    <header class="block-head"><h3>Cofrinhos</h3>${tip('Dinheiro guardado para um objetivo, numa instituição. Guardar e resgatar são transferências entre a conta e o cofrinho; rendimentos entram em Atualizar saldo.')}<button type="button" class="btn small" data-new-piggy>${icon('plus')}Cofrinho</button></header>
+    ${
+      piggies.length
+        ? `<div class="piggies">${piggies
+            .map((a) => {
+              const g = piggyInfo(S, a, td, bal);
+              const inst = S.byId.get(a.institutionId);
+              return `<button type="button" class="piggy" data-piggy="${a.id}" style="--c:${inst?.color || COLORS[1]}">
+                <span class="piggy-top"><b>${esc(a.name)}</b><span class="piggy-pct${g.done ? ' done' : ''}">${g.done ? 'Meta atingida' : `${Math.floor(g.pct)}%`}</span></span>
+                <span class="piggy-inst"><i></i>${esc(inst?.name || 'Sem instituição')}</span>
+                <span class="bar${g.done ? ' done' : ''}"><i style="width:${g.pct}%"></i></span>
+                <span class="piggy-val"><b>${money(g.balance)}</b> de ${money(g.goal)}</span>
+              </button>`;
+            })
+            .join('')}</div>`
+        : `<p class="empty">Nenhum cofrinho. Crie um para acompanhar uma meta, como uma reserva de emergência.</p>`
+    }
+  </section>
   ${S.acct.some((a) => a.archived) || S.card.some((c) => c.archived) ? `<p class="foot-note">${S.acct.filter((a) => a.archived).length + S.card.filter((c) => c.archived).length} itens arquivados não aparecem aqui, mas continuam no histórico.</p>` : ''}`;
 
   el.querySelector('[data-new-inst]').addEventListener('click', () => openInst());
   el.querySelector('[data-new-debt]').addEventListener('click', () => openDebt());
+  el.querySelector('[data-new-piggy]').addEventListener('click', () => openPiggy());
+  el.querySelectorAll('[data-piggy]').forEach((b) => b.addEventListener('click', () => piggyDetail(b.dataset.piggy)));
   el.querySelectorAll('[data-inst]').forEach((b) => b.addEventListener('click', () => openInst(b.dataset.inst)));
   el.querySelectorAll('[data-add-acct]').forEach((b) => b.addEventListener('click', () => openAcct(null, { institutionId: b.dataset.addAcct, kind: b.dataset.kind })));
   el.querySelectorAll('[data-add-card]').forEach((b) => b.addEventListener('click', () => openCard(null, { institutionId: b.dataset.addCard })));
@@ -148,6 +172,7 @@ function openInst(id) {
 function openAcct(id, preset = {}) {
   const S = store.snapshot();
   if (id && S.byId.get(id)?.kind === 'divida') return openDebt(id);
+  if (id && S.byId.get(id)?.kind === 'cofrinho') return openPiggy(id);
   const td = today();
   const a = id ? S.byId.get(id) : { kind: preset.kind || 'corrente', institutionId: preset.institutionId || '', name: preset.name || '', opening: 0, openingDate: td, overdraftLimit: 0 };
   let kind = a.kind;
@@ -155,7 +180,7 @@ function openAcct(id, preset = {}) {
     ${kind === 'corrente' ? field('Limite do cheque especial', moneyInput('overdraftLimit', a.overdraftLimit || 0), 'Quanto o banco deixa a conta ficar negativa. Serve para acompanhar o uso do limite.') : ''}
     ${kind === 'voucher' ? field('Tipo de voucher', `<select name="voucherKind">${Object.entries(VOUCHER_KINDS).map(([k, l]) => opt(k, l, k === a.voucherKind)).join('')}</select>`) : ''}
     ${kind === 'investimento' ? field('Tipo de investimento', `<select name="investKind">${Object.entries(INVEST_KINDS).map(([k, l]) => opt(k, l, k === a.investKind)).join('')}</select>`) : ''}`;
-  const kinds = Object.entries(ACCOUNT_KINDS).filter(([k]) => k !== 'divida');
+  const kinds = Object.entries(ACCOUNT_KINDS).filter(([k]) => k !== 'divida' && k !== 'cofrinho');
   sheet({
     title: id ? 'Editar conta' : 'Nova conta',
     body: `<form class="form" data-f>
@@ -214,6 +239,7 @@ async function removeWallet(id, k, close) {
 function acctDetail(id) {
   const S = store.snapshot();
   const a = S.byId.get(id);
+  if (a.kind === 'cofrinho') return piggyDetail(id);
   const b = balances(S, today()).get('a:' + id) || 0;
   const isDebt = a.kind === 'divida';
   const canReneg = b < 0 && (isDebt || a.kind === 'corrente' || a.kind === 'poupanca');
@@ -230,7 +256,7 @@ function acctDetail(id) {
       <div class="detail-actions">
         ${isDebt && b < 0 ? `<button type="button" class="btn primary" data-paydebt>Pagar</button>` : ''}
         ${canReneg ? `<button type="button" class="btn" data-reneg>${icon('swap')}Renegociar</button>` : ''}
-        <button type="button" class="btn${isDebt ? ' ghost' : ''}" data-adjust>${icon('refresh')}${a.kind === 'investimento' || isDebt ? 'Atualizar saldo' : 'Ajustar saldo'}</button>
+        <button type="button" class="btn${isDebt ? ' ghost' : ''}" data-adjust>${icon('refresh')}${a.kind === 'investimento' || a.kind === 'cofrinho' || isDebt ? 'Atualizar saldo' : 'Ajustar saldo'}</button>
         <button type="button" class="btn ghost" data-edit>${icon('edit')}Editar</button>
         <button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Remover</button>
       </div>
@@ -262,12 +288,12 @@ function adjust(id, current) {
   const isDebt = a.kind === 'divida';
   const shown = isDebt ? Math.max(0, -current) : current;
   sheet({
-    title: a.kind === 'investimento' || isDebt ? 'Atualizar saldo' : 'Ajustar saldo',
+    title: a.kind === 'investimento' || a.kind === 'cofrinho' || isDebt ? 'Atualizar saldo' : 'Ajustar saldo',
     body: `<form class="form" data-f>
       <p class="sheet-text">${
         isDebt
           ? `Devido no Pago: <b>${money(shown)}</b>. Informe quanto a dívida está hoje (com juros e encargos). A diferença vira um ajuste e não conta como saída do mês.`
-          : `Saldo no Pago: <b>${money(current)}</b>. Informe o saldo real; a diferença vira um ajuste${a.kind === 'investimento' ? ' (rendimento, depósito de FGTS etc.)' : ''} e não conta como entrada ou saída do mês.`
+          : `Saldo no Pago: <b>${money(current)}</b>. Informe o saldo real; a diferença vira um ajuste${a.kind === 'investimento' ? ' (rendimento, depósito de FGTS etc.)' : a.kind === 'cofrinho' ? ' (rendimento), que não conta como depósito' : ''} e não conta como entrada ou saída do mês.`
       }</p>
       ${moneyInput('v', shown, { big: true, allowNeg: !isDebt, autofocus: true })}
       <label class="field"><span>Data</span><input name="date" type="date" value="${today()}" required></label>
@@ -347,6 +373,97 @@ function openDebt(id) {
         close();
         toast('Dívida registrada');
       };
+    },
+  });
+}
+
+/* ---------- Cofrinhos ---------- */
+function openPiggy(id) {
+  const S = store.snapshot();
+  const td = today();
+  const a = id ? S.byId.get(id) : { name: '', institutionId: S.inst[0]?.id || '', goal: 0, opening: 0, openingDate: td, targetDate: '' };
+  if (!S.inst.length) return toast('Cadastre antes a instituição onde o cofrinho fica.');
+  sheet({
+    title: id ? 'Editar cofrinho' : 'Novo cofrinho',
+    body: `<form class="form" data-f>
+      <label class="field"><span>Nome do objetivo</span><input name="name" value="${esc(a.name)}" required maxlength="40" placeholder="Ex.: Reserva de emergência"></label>
+      ${field('Instituição', `<select name="institutionId">${S.inst.map((i) => opt(i.id, i.name, i.id === a.institutionId)).join('')}</select>`, 'Onde o dinheiro do cofrinho fica guardado.')}
+      <span class="field-label">Meta</span>
+      ${moneyInput('goal', a.goal || 0, { big: true })}
+      ${field('Data para atingir', `<input name="targetDate" type="date" value="${a.targetDate || ''}">`, 'Opcional. Com uma data, o Pago mostra quanto guardar por mês para chegar lá.')}
+      ${id ? '' : `<div class="grid2"><div><span class="field-label">Já guardado</span>${moneyInput('opening', 0)}</div>
+        ${field('Valor em', `<input name="openingDate" type="date" value="${td}" required>`)}</div>`}
+      <div class="sheet-actions">${id ? `<button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Excluir</button>` : '<span></span>'}<button class="btn primary">Salvar</button></div>
+    </form>`,
+    onMount(el, close) {
+      const f = el.querySelector('[data-f]');
+      el.querySelector('[data-del]')?.addEventListener('click', () => removeWallet(id, 'a', close));
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        const goal = Math.abs(readMoney(f.goal));
+        if (!goal) return toast('Defina a meta do cofrinho.');
+        if (!f.institutionId.value) return toast('Escolha a instituição.');
+        const data = id
+          ? { ...a, name: f.name.value.trim(), institutionId: f.institutionId.value, goal, targetDate: f.targetDate.value }
+          : { kind: 'cofrinho', name: f.name.value.trim(), institutionId: f.institutionId.value, goal, targetDate: f.targetDate.value, opening: Math.abs(readMoney(f.opening)), openingDate: f.openingDate.value, archived: false };
+        await store.save('acct', data, id);
+        close();
+        toast('Cofrinho salvo');
+      };
+    },
+  });
+}
+
+function piggyDetail(id) {
+  const S = store.snapshot();
+  const td = today();
+  const a = S.byId.get(id);
+  const g = piggyInfo(S, a, td);
+  const inst = S.byId.get(a.institutionId);
+  const idle =
+    g.daysWithout === 0
+      ? g.lastDeposit
+        ? 'Recebeu um depósito hoje.'
+        : 'Criado hoje.'
+      : `Há ${g.daysWithout} ${g.daysWithout === 1 ? 'dia' : 'dias'} sem receber nenhum valor${g.lastDeposit ? `. Último depósito em ${fmtDateHuman(g.lastDeposit)}` : ', desde a criação'}.`;
+  const txs = S.tx.filter((t) => t.from?.id === id || t.to?.id === id).slice(-15).reverse();
+  sheet({
+    title: a.name,
+    wide: true,
+    body: `<div class="piggy-detail" style="--c:${inst?.color || COLORS[1]}">
+        <div class="ring" style="--p:${g.pct}" role="img" aria-label="${Math.floor(g.pct)}% da meta"><span><b>${Math.floor(g.pct)}%</b><small>da meta</small></span></div>
+        <div class="piggy-nums">
+          <div><span>Guardado</span><b>${money(g.balance)}</b></div>
+          <div><span>Meta</span><b>${money(g.goal)}</b></div>
+          <div><span>${g.done ? 'Acima da meta' : 'Falta'}</span><b>${money(g.done ? g.balance - g.goal : g.remaining)}</b></div>
+        </div>
+      </div>
+      <p class="idle ${g.daysWithout >= 30 ? 'warn' : ''}">${icon('plan')}<span>${esc(idle)}</span></p>
+      ${a.targetDate ? `<p class="form-meta">${g.done ? `Meta atingida antes de ${fmtDateHuman(a.targetDate)}.` : g.monthsLeft < 0 ? `A data para atingir (${fmtDateHuman(a.targetDate)}) já passou.` : `Para chegar até ${fmtDateHuman(a.targetDate)}, guarde ${money(g.perMonth)} por mês.`}</p>` : ''}
+      <p class="form-meta">${esc(inst?.name || 'Sem instituição')}</p>
+      <div class="detail-actions">
+        <button type="button" class="btn primary" data-in>${icon('in')}Guardar</button>
+        <button type="button" class="btn" data-out ${g.balance ? '' : 'disabled'}>${icon('out')}Resgatar</button>
+        <button type="button" class="btn ghost" data-adjust>${icon('refresh')}Atualizar saldo</button>
+        <button type="button" class="btn ghost" data-edit>${icon('edit')}Editar</button>
+      </div>
+      <h4 class="sub">Movimentações</h4>
+      ${txs.length ? txs.map((t) => txRow(S, t, { showDate: true })).join('') : `<p class="empty">Nenhuma movimentação ainda.</p>`}`,
+    onMount(el, close) {
+      el.querySelector('[data-in]').onclick = () => {
+        close();
+        openTx({ type: 'transf', toV: `a:${id}`, desc: `Guardar em ${a.name}` });
+      };
+      el.querySelector('[data-out]').onclick = () => {
+        close();
+        openTx({ type: 'transf', fromV: `a:${id}`, desc: `Resgate de ${a.name}` });
+      };
+      el.querySelector('[data-adjust]').onclick = () => adjust(id, g.balance);
+      el.querySelector('[data-edit]').onclick = () => {
+        close();
+        openPiggy(id);
+      };
+      el.querySelectorAll('[data-tx]').forEach((x) => (x.onclick = () => openTx({ id: x.dataset.tx })));
     },
   });
 }

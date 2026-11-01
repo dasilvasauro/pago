@@ -46,6 +46,8 @@ export async function seedDemo() {
   const cv = await store.save('acct', { kind: 'corrente', name: 'Conta digital', institutionId: verde, opening: 32000, openingDate: start, overdraftLimit: 0 });
   const va = await store.save('acct', { kind: 'voucher', name: 'Vale-alimentação', voucherKind: 'alimentacao', opening: 41000, openingDate: start });
   await store.save('acct', { kind: 'investimento', name: 'FGTS', investKind: 'fgts', opening: 530000, openingDate: start });
+  const pig = await store.save('acct', { kind: 'cofrinho', name: 'Reserva de emergência', institutionId: verde, goal: 500000, targetDate: `${addMonths(ym, 10)}-01`, opening: 45000, openingDate: start, archived: false });
+  await store.save('tx', { type: 'transf', amount: 20000, date: addDays(td, -12), from: { k: 'a', id: cv }, to: { k: 'a', id: pig }, desc: 'Guardar em Reserva de emergência' });
   const deb = await store.save('card', { kind: 'debito', name: 'Débito Azul', institutionId: azul, accountId: cc });
   const cr = await store.save('card', { kind: 'credito', name: 'Cartão Azul', institutionId: azul, limit: 300000, closingDay: 3, dueDay: 10, openInv: 64000, openRest: 120000, openRestN: 4, openingDate: start });
   await store.save('card', { kind: 'credito', name: 'Cartão Verde', institutionId: verde, limit: 150000, closingDay: 20, dueDay: 28, openInv: 23000, openRest: 0, openRestN: 1, openingDate: start });
