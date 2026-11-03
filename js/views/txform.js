@@ -261,12 +261,12 @@ export function openTx(preset = {}) {
 }
 
 /* ---------- Pagar / receber um compromisso ---------- */
-export function openPay(o) {
+export function openPay(o, opts = {}) {
   const S = store.snapshot();
   if (o.paid && o.tx) return openTx({ id: o.tx.id });
   const isIn = o.dir === 'in';
   const isInv = o.kind === 'invoice';
-  const amount = dueAmount(o);
+  const amount = opts.amount ?? dueAmount(o);
   const defV = isInv ? localStorage.getItem(LAST + 'from') || '' : encodeWallet(o.ref, o.src?.sourceVia);
   const mode = isIn ? 'in' : isInv ? 'from' : 'out';
   sheet({

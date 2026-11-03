@@ -5,6 +5,8 @@ import { esc, money, fmtDay, fmtMonth, fmtDate, fmtDateHuman, fmtMonthShort, add
 import { icon, tip, sheet, moneyInput, readMoney, opt, seg, field, toast, confirmDialog, colorPicker, COLORS, bindMoney } from '../ui/ui.js';
 import { txRow, openTx, openPay, walletOptions } from './txform.js';
 import { openRenegotiate } from './plan.js';
+import { calcAdd } from '../ui/calc.js';
+import { PRIORITY } from '../core/domain.js';
 
 export const title = 'Carteira';
 
@@ -258,6 +260,7 @@ function acctDetail(id) {
         ${canReneg ? `<button type="button" class="btn" data-reneg>${icon('swap')}Renegociar</button>` : ''}
         <button type="button" class="btn${isDebt ? ' ghost' : ''}" data-adjust>${icon('refresh')}${a.kind === 'investimento' || a.kind === 'cofrinho' || isDebt ? 'Atualizar saldo' : 'Ajustar saldo'}</button>
         <button type="button" class="btn ghost" data-edit>${icon('edit')}Editar</button>
+        <button type="button" class="btn ghost" data-calc>${icon('calc')}Calculadora</button>
         <button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Remover</button>
       </div>
       <h4 class="sub">Últimos lançamentos</h4>
@@ -269,6 +272,7 @@ function acctDetail(id) {
       };
       el.querySelector('[data-del]').onclick = () => removeWallet(id, 'a', close);
       el.querySelector('[data-adjust]').onclick = () => adjust(id, b);
+      el.querySelector('[data-calc]').onclick = () => calcAdd({ label: isDebt ? `${a.name} (devido)` : `Saldo ${a.name}`, v: isDebt ? Math.max(0, -b) : b });
       el.querySelector('[data-paydebt]')?.addEventListener('click', () => {
         close();
         openTx({ type: 'transf', toV: `a:${id}`, desc: `Pagamento ${a.name}` });
@@ -489,7 +493,8 @@ function openCard(id, preset = {}) {
           <div><span class="field-label">Parcelas futuras ${tip('Soma das parcelas que já estão programadas para as faturas seguintes.')}</span>${moneyInput('openRest', c.openRest || 0)}</div>
           <label class="field"><span>Em quantos meses</span><input name="openRestN" type="number" min="1" max="48" value="${c.openRestN || 1}" inputmode="numeric"></label>
         </div>
-        ${field('Valores informados em', `<input name="openingDate" type="date" value="${c.openingDate}" required>`)}`;
+        ${field('Valores informados em', `<input name="openingDate" type="date" value="${c.openingDate}" required>`)}
+        ${field('Prioridade da fatura', seg('priority', Object.entries(PRIORITY), c.priority || 'normal'), 'Orienta a Sugestão de pagamento. Um cartão usado para mercado e remédios pode ser essencial.')}`;
   sheet({
     title: id ? 'Editar cartão' : 'Novo cartão',
     body: `<form class="form" data-f>
@@ -524,6 +529,7 @@ function openCard(id, preset = {}) {
             openRest: Math.abs(readMoney(f.openRest)),
             openRestN: Number(f.openRestN.value) || 1,
             openingDate: f.openingDate.value,
+            priority: f.querySelector('input[name=priority]:checked')?.value || 'normal',
           });
         await store.save('card', data, id);
         close();
@@ -553,6 +559,7 @@ function cardDetail(id) {
       <div class="detail-actions">
         ${info.current && info.current.remaining > 0 ? `<button type="button" class="btn primary" data-pay>Pagar fatura</button>` : ''}
         ${info.outstanding > 0 ? `<button type="button" class="btn" data-reneg>${icon('swap')}Renegociar</button>` : ''}
+        <button type="button" class="btn ghost" data-calc>${icon('calc')}Calculadora</button>
         <button type="button" class="btn ghost" data-edit>${icon('edit')}Editar</button>
         <button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Remover</button>
       </div>
@@ -568,6 +575,8 @@ function cardDetail(id) {
         close();
         openRenegotiate({ card: id });
       });
+      el.querySelector('[data-calc]').onclick = () =>
+        info.current ? calcAdd({ label: `Fatura ${c.name} (${fmtMonthShort(info.current.ref)})`, v: info.current.remaining || info.current.amount }) : calcAdd({ label: `Dívida ${c.name}`, v: Math.max(0, info.outstanding) });
       el.querySelector('[data-pay]')?.addEventListener('click', () => {
         const ob = obligations(S, info.current.due.slice(0, 7), info.current.due.slice(0, 7), td).find((o) => o.id === `i:${id}:${info.current.ref}`);
         if (ob) openPay(ob);

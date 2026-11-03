@@ -2,6 +2,8 @@ import * as store from '../core/store.js';
 import { position, series, monthStats, projection, obligations, balances, cardInfo, firstDate, dueAmount, lateBills } from '../core/domain.js';
 import { lateSnoozed, snoozeLate, snoozeEndsIn, HOUR } from '../core/snooze.js';
 import { openLateBills } from './plan.js';
+import { openSuggest } from './suggest.js';
+import { calcAdd } from '../ui/calc.js';
 import { app } from '../state.js';
 import { today } from '../lib/clock.js';
 import { esc, money, moneySigned, addDays, addMonths, ymOf, relDay, fmtDay, fmtMonth } from '../lib/util.js';
@@ -54,7 +56,7 @@ export function render(el) {
   ${
     showLate
       ? `<section class="alert" role="alert">
-      <div class="alert-txt"><b>${late.length} ${late.length === 1 ? 'conta atrasada' : 'contas atrasadas'}, ${money(lateTotal)}</b>
+      <div class="alert-txt"><b>${late.length} ${late.length === 1 ? 'conta atrasada' : 'contas atrasadas'}, ${money(lateTotal)}<button type="button" class="icon-btn sm" data-late-calc aria-label="Levar as contas atrasadas para a calculadora" title="Levar para a calculadora">${icon('calc')}</button></b>
       <span>${esc([...byBill].map(([n, c]) => `${n} (${c} ${c === 1 ? 'mês' : 'meses'})`).join(', '))}</span></div>
       <div class="alert-acts">
         <button type="button" class="btn small primary" data-late-pay>Pagar agora</button>
@@ -120,7 +122,7 @@ export function render(el) {
     </section>
 
     <section class="panel">
-      <header class="panel-head"><h3>Próximos vencimentos</h3>${tip('Contas, parcelas e faturas não pagas que vencem nos próximos 10 dias, mais as atrasadas.')}<a href="#planejar" class="link">Ver mês</a></header>
+      <header class="panel-head"><h3>Próximos vencimentos</h3>${tip('Contas, parcelas e faturas não pagas que vencem nos próximos 10 dias, mais as atrasadas.')}<button type="button" class="link" data-suggest>Sugestão</button><a href="#planejar" class="link nogap">Ver mês</a></header>
       ${
         upcoming.length
           ? `<ul class="due-list">${upcoming
@@ -214,6 +216,10 @@ export function render(el) {
     }),
   );
   el.querySelector('[data-late-pay]')?.addEventListener('click', openLateBills);
+  el.querySelector('[data-suggest]')?.addEventListener('click', openSuggest);
+  el.querySelector('[data-late-calc]')?.addEventListener('click', () =>
+    calcAdd({ label: `Contas atrasadas (${late.length})`, items: late.map((x) => ({ label: `${x.bill.name} ${fmtDay(x.date)}`, v: x.amount })) }),
+  );
   el.querySelector('[data-late-later]')?.addEventListener('click', () => {
     snoozeLate(HOUR, lateKeys);
     render(el);

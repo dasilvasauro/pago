@@ -251,6 +251,30 @@ Os ajustes valem para o calendário, as contas em atraso, a dívida total, a pro
 - **Voltar ao mês inteiro:** toque de novo no mesmo dia ou em "Ver o mês inteiro".
 - **No computador:** as setas do teclado navegam pelos dias.
 
+**Calculadora.** Fica no botão do topo, em qualquer tela. A conta é montada como uma fita, operada na ordem em que aparece.
+
+- **Valores livres:** digite normalmente. Depois de × ou ÷, o número digitado é um fator; por exemplo, ÷ 2 divide por dois.
+- **Valores do app:** saldos, faturas, dívida de cada cartão, contas atrasadas, o que falta pagar no mês, acordos, dívida total e projeção.
+  - Marque vários valores e eles entram juntos como uma soma.
+- **Ícone de calculadora:** aparece no aviso de contas atrasadas, na tela de atrasadas (total e cada conta), no "Falta" de Planejar e no detalhe de contas e cartões. Ele leva aqueles valores direto para a fita.
+- **Na fita:** cada linha pode ser removida, e as somas mostram os itens.
+- **Lançar:** cria um lançamento com o resultado.
+- **Persistência:** a fita fica salva no aparelho até você limpar.
+
+**Prioridade.** Contas recorrentes, acordos e cartões podem ser marcados como Normal, Importante ou Essencial. Os essenciais e importantes ganham um selo no calendário e nas contas atrasadas.
+
+**Sugestão de pagamento.** Fica em Planejar, na tela de atrasadas e no painel de vencimentos. Usa regras simples, sem IA:
+
+1. **Valor disponível:** parte da soma dos saldos positivos. Você pode diminuir para guardar o dinheiro do dia a dia.
+2. **Ordem dos compromissos:** até o próximo recebimento previsto, eles são ordenados por:
+   - prioridade marcada;
+   - tipo: parcela de acordo, que pode desfazer o acordo, e fatura, que vai para o rotativo;
+   - atraso: um serviço essencial atrasado há 15 dias ou mais pode ser cortado;
+   - proximidade do vencimento.
+3. **Distribuição do dinheiro:** o valor disponível é distribuído nessa ordem.
+   - Fatura pode ser paga em parte.
+   - O que não couber aparece em "Pode esperar", com a data do próximo recebimento.
+
 **Pagar uma fatura** é uma transferência da conta para o cartão de crédito. Ela não conta como gasto, porque a compra já contou quando foi feita.
 
 **Resumo do dia.** Ao abrir o app num novo dia aparece o resumo do dia anterior. Se você passou dias sem abrir, o resumo cobre todo o período: variação da dívida, entradas, saídas, dias sem registro e o que ficou pendente.

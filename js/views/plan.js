@@ -5,6 +5,11 @@ import { esc, money, ymOf, addMonths, fmtMonth, fmtMonthShort, relDay, sum, fmtD
 import { icon, tip, sheet, moneyInput, readMoney, opt, seg, field, toast, confirmDialog } from '../ui/ui.js';
 import { openPay, walletOptions, decodeWallet, encodeWallet } from './txform.js';
 import { subscribe } from '../core/store.js';
+import { PRIORITY, prioOf } from '../core/domain.js';
+import { calcAdd } from '../ui/calc.js';
+import { openSuggest, prioPill } from './suggest.js';
+
+const prioField = (v) => field('Prioridade', seg('priority', Object.entries(PRIORITY), v || 'normal'), 'Marque como essencial os serviços que não podem faltar (luz, água, gás, aluguel). A prioridade orienta a Sugestão de pagamento.');
 import { METHODS, BILL_METHODS, methodChoices } from '../core/methods.js';
 
 const methodSelect = (sel) =>
@@ -39,12 +44,12 @@ export function render(el) {
   <section class="panel plan-sum">
     <div class="ps-row"><span>Comprometido ${tip('Soma das contas fixas, parcelas e faturas que vencem neste mês.')}</span><b>${money(total)}</b></div>
     <div class="bar big"><i style="width:${total ? Math.min(100, (paidOut / total) * 100) : 0}%"></i></div>
-    <div class="ps-foot"><span>Pago ${money(paidOut)}</span><span>Falta ${money(Math.max(0, total - paidOut))}</span></div>
+    <div class="ps-foot"><span>Pago ${money(paidOut)}</span><span class="ps-falta">Falta ${money(Math.max(0, total - paidOut))}${total - paidOut > 0 ? `<button type="button" class="icon-btn sm" data-calc-month aria-label="Levar o que falta pagar para a calculadora" title="Levar para a calculadora">${icon('calc')}</button>` : ''}</span></div>
     ${ins.length ? `<div class="ps-row in"><span>Receitas previstas</span><b class="pos">${money(inTotal)}</b></div><div class="ps-foot"><span>Recebido ${money(inPaid)}</span><span>Falta ${money(inTotal - inPaid)}</span></div>` : ''}
   </section>
 
   <section class="block">
-    <header class="block-head"><h3>Calendário do mês</h3>${tip('Toque em Pagar ou Receber para registrar no diário, com valor, conta e categoria preenchidos. Toque no nome de uma conta recorrente para ajustar o valor ou a data só daquele mês, antes de pagar.')}</header>
+    <header class="block-head"><h3>Calendário do mês</h3><button type="button" class="btn small ghost head-right" data-suggest>${icon('flag')}Sugestão de pagamento</button>${tip('Toque em Pagar ou Receber para registrar no diário, com valor, conta e categoria preenchidos. Toque no nome de uma conta recorrente para ajustar o valor ou a data só daquele mês, antes de pagar.')}</header>
     ${
       obs.length
         ? `<ul class="ob-list">${obs
@@ -55,7 +60,7 @@ export function render(el) {
                 <div class="ob-date"><b>${o.date.slice(8)}</b><span>${fmtDay(o.date).split(' ')[1]}</span></div>
                 <div class="ob-main">${o.kind === 'bill' && (!o.paid || o.settled) ? `<button type="button" class="ob-title" data-occ="${esc(o.id)}" aria-label="Ajustar ${esc(o.title)} deste mês">${esc(o.title)}${icon('edit', 'sm')}</button>` : `<b>${esc(o.title)}</b>`}
                   ${o.parts.length > 1 ? `<span>${o.parts.map((p) => `${esc(p.label)} ${money(p.amount)}`).join(' + ')}</span>` : o.kind === 'invoice' ? `<span>${o.partial ? `Pago ${money(o.amount - o.remaining)} de ${money(o.amount)}` : 'Fatura do cartão'}</span>` : o.kind === 'plan' ? `<span>${esc(o.parts[0].label)}</span>` : o.src.variable ? '<span>Valor variável</span>' : ''}
-                  <span class="ob-pills">${state}${o.edited ? '<span class="pill">Ajustado</span>' : ''}</span>
+                  <span class="ob-pills">${state}${o.dir === 'out' && !o.paid ? prioPill(prioOf(o)) : ''}${o.edited ? '<span class="pill">Ajustado</span>' : ''}</span>
                 </div>
                 <div class="ob-side"><span class="amt ${o.dir === 'in' ? 'pos' : ''}">${money(o.kind === 'invoice' && !o.paid ? o.remaining : o.amount)}</span>
                   ${o.reneg || o.settled ? '' : `<button type="button" class="btn small ${o.paid ? 'ghost' : ''}" data-ob="${esc(o.id)}">${o.paid ? 'Ver' : o.dir === 'in' ? 'Receber' : 'Pagar'}</button>`}</div>
@@ -82,7 +87,7 @@ export function render(el) {
           ? `<ul class="rows">${S.bill
               .map(
                 (b) => `<li><button type="button" data-bill="${b.id}" class="row-btn ${b.active === false ? 'muted' : ''}">
-                  <span class="row-main"><b>${esc(b.name)}</b><span>Dia ${b.day}${b.variable ? ', valor variável' : ''}${b.active === false ? ', pausada' : ''}${b.endMonth ? `, até ${fmtMonthShort(b.endMonth)}` : ''}</span></span>
+                  <span class="row-main"><b>${esc(b.name)}${b.priority === 'essencial' || b.priority === 'importante' ? `<span class="flag ${b.priority}" title="${PRIORITY[b.priority]}">${icon('flag')}</span>` : ''}</b><span>Dia ${b.day}${b.variable ? ', valor variável' : ''}${b.active === false ? ', pausada' : ''}${b.endMonth ? `, até ${fmtMonthShort(b.endMonth)}` : ''}</span></span>
                   <span class="amt ${b.dir === 'in' ? 'pos' : ''}">${b.dir === 'in' ? '+' : ''}${money(b.amount)}</span></button></li>`,
               )
               .join('')}</ul>`
@@ -116,6 +121,11 @@ export function render(el) {
   );
   const byId = new Map(obs.map((o) => [o.id, o]));
   el.querySelectorAll('[data-ob]').forEach((b) => b.addEventListener('click', () => openPay(byId.get(b.dataset.ob))));
+  el.querySelector('[data-suggest]')?.addEventListener('click', openSuggest);
+  el.querySelector('[data-calc-month]')?.addEventListener('click', () => {
+    const open = obs.filter((o) => o.dir === 'out' && !o.paid);
+    calcAdd({ label: `A pagar em ${fmtMonth(month).toLowerCase()}`, items: open.map((o) => ({ label: o.title, v: dueAmount(o) })) });
+  });
   el.querySelectorAll('[data-occ]').forEach((b) => b.addEventListener('click', () => openOccurrence(byId.get(b.dataset.occ))));
   el.querySelectorAll('[data-unskip]').forEach((b) =>
     b.addEventListener('click', async () => {
@@ -154,6 +164,7 @@ export function openBill(id) {
       </div>
       <div data-dyn>${dyn()}</div>
       ${methodSelect(b.method)}
+      <div data-prio>${dir === 'in' ? '' : prioField(b.priority)}</div>
       <div class="grid2">
         <label class="field"><span>Termina em</span><input name="endMonth" type="month" value="${b.endMonth || ''}"></label>
         <label class="check pad"><input type="checkbox" name="active" ${b.active !== false ? 'checked' : ''}><span>Ativa</span></label>
@@ -166,6 +177,7 @@ export function openBill(id) {
         r.addEventListener('change', () => {
           dir = r.value;
           el.querySelector('[data-dyn]').innerHTML = dyn();
+          el.querySelector('[data-prio]').innerHTML = dir === 'in' ? '' : prioField(b.priority);
         }),
       );
       el.querySelector('[data-del]')?.addEventListener('click', async () => {
@@ -190,6 +202,7 @@ export function openBill(id) {
           source: w.ref,
           sourceVia: w.via || '',
           method: f.method.value,
+          priority: dir === 'in' ? '' : f.querySelector('input[name=priority]:checked')?.value || 'normal',
         };
         await store.save('bill', data, id);
         close();
@@ -235,6 +248,7 @@ export function openPlan(id, extra = null) {
         ${field('Categoria', `<select name="categoryId">${catOpts(S, 'saida', p.categoryId || S.cat.find((c) => c.kind === 'saida' && c.name === 'Dívidas e acordos')?.id)}</select>`)}
       </div>
       ${methodSelect(p.method)}
+      ${prioField(p.priority || (p.kind === 'acordo' || !id ? 'importante' : 'normal'))}
       <p class="form-meta" data-calc></p>
       <div class="sheet-actions">${id ? `<button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Excluir</button>` : '<span></span>'}<button class="btn primary">${extra ? 'Criar acordo' : 'Salvar'}</button></div>
     </form>`,
@@ -299,6 +313,7 @@ export function openPlan(id, extra = null) {
           source: w.ref,
           sourceVia: w.via || '',
           method: f.method.value,
+          priority: f.querySelector('input[name=priority]:checked')?.value || 'normal',
           openingDate: p.openingDate || td,
           covers: p.covers || [],
           origin: p.origin || 0,
@@ -494,11 +509,12 @@ export function openLateBills() {
         }
         const list = [...groups.values()].sort((a, b) => b.total - a.total);
         box.innerHTML = `
-          <div class="reneg-total"><span>${late.length} ${late.length === 1 ? 'conta atrasada' : 'contas atrasadas'}</span><b>${money(sum(late, (x) => x.amount))}</b></div>
+          <div class="reneg-total"><span>${late.length} ${late.length === 1 ? 'conta atrasada' : 'contas atrasadas'}</span><span class="tot-right"><b>${money(sum(late, (x) => x.amount))}</b><button type="button" class="icon-btn sm" data-calc-all aria-label="Levar todas para a calculadora" title="Levar para a calculadora">${icon('calc')}</button></span></div>
+          <button type="button" class="btn small ghost" data-suggest>${icon('flag')}Ver sugestão de pagamento</button>
           ${list
             .map(
               (g) => `<section class="late-group">
-                <header><div><b>${esc(g.bill.name)}</b><span>${g.items.length} ${g.items.length === 1 ? 'mês' : 'meses'}${g.bill.categoryId && S.byId.get(g.bill.categoryId) ? `, ${esc(S.byId.get(g.bill.categoryId).name)}` : ''}</span></div><b>${money(g.total)}</b></header>
+                <header><div><b>${esc(g.bill.name)} ${prioPill(g.bill.priority)}</b><span>${g.items.length} ${g.items.length === 1 ? 'mês' : 'meses'}${g.bill.categoryId && S.byId.get(g.bill.categoryId) ? `, ${esc(S.byId.get(g.bill.categoryId).name)}` : ''}</span></div><span class="tot-right"><b>${money(g.total)}</b><button type="button" class="icon-btn sm" data-calc-g="${g.bill.id}" aria-label="Levar ${esc(g.bill.name)} para a calculadora" title="Levar para a calculadora">${icon('calc')}</button></span></header>
                 <ul>${g.items
                   .map(
                     (x) => `<li><div><b>${fmtMonth(x.month)}</b><span>Venceu em ${fmtDate(x.date)}</span></div><span class="amt">${money(x.amount)}</span>
@@ -540,6 +556,15 @@ export function openLateBills() {
             }),
         );
         box.querySelectorAll('[data-payall]').forEach((b) => (b.onclick = () => payAll(groups.get(b.dataset.payall), findOb)));
+        const itemsOf = (xs) => xs.map((x) => ({ label: `${x.bill.name} ${fmtMonthShort(x.month)}`, v: x.amount }));
+        box.querySelector('[data-calc-all]')?.addEventListener('click', () => calcAdd({ label: `Contas atrasadas (${late.length})`, items: itemsOf(late) }));
+        box.querySelectorAll('[data-calc-g]').forEach((b) =>
+          b.addEventListener('click', () => {
+            const g = groups.get(b.dataset.calcG);
+            calcAdd(g.items.length > 1 ? { label: `${g.bill.name} (${g.items.length} meses)`, items: itemsOf(g.items) } : { label: itemsOf(g.items)[0].label, v: g.items[0].amount });
+          }),
+        );
+        box.querySelector('[data-suggest]')?.addEventListener('click', openSuggest);
       };
       draw();
       unsub = subscribe(draw);

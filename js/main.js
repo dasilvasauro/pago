@@ -9,6 +9,7 @@ import * as notify from './core/notify.js';
 import { seedCategories, seedDemo, simulateDay, resetSimCache } from './core/seed.js';
 import { icon, initTips, toast, sheet, confirmDialog, COLORS } from './ui/ui.js';
 import { initPickers, popover } from './ui/pickers.js';
+import { openCalc } from './ui/calc.js';
 import { who } from './state.js';
 import * as gate from './views/gate.js';
 import { maybeSummary } from './views/summary.js';
@@ -20,7 +21,7 @@ import * as wallet from './views/wallet.js';
 import * as settings from './views/settings.js';
 import { app } from './state.js';
 
-app.version = '1.6.0';
+app.version = '1.7.0';
 const VIEWS = { inicio: dashboard, diario: diary, planejar: plan, carteira: wallet, ajustes: settings };
 const NAV = [
   ['inicio', 'Início', 'home'],
@@ -174,7 +175,7 @@ function shell() {
     <div class="main-col">
       <div class="head">
         ${app.test ? `<div class="testbar" data-testbar></div>` : ''}
-        <header class="topbar"><h1 data-title></h1><span class="sync-dot" data-dot title=""></span><button type="button" class="me-btn" data-me aria-label="Conta e tema" aria-haspopup="dialog"></button></header>
+        <header class="topbar"><h1 data-title></h1><button type="button" class="icon-btn calc-btn" data-calcbtn aria-label="Calculadora" title="Calculadora">${icon('calc')}</button><span class="sync-dot" data-dot title=""></span><button type="button" class="me-btn" data-me aria-label="Conta e tema" aria-haspopup="dialog"></button></header>
       </div>
       <main id="view" tabindex="-1"></main>
     </div>
@@ -234,6 +235,7 @@ function start() {
   shell();
   initPickers();
   $('[data-me]').addEventListener('click', (e) => meMenu(e.currentTarget));
+  $('[data-calcbtn]').addEventListener('click', openCalc);
   app.nav = (r) => (location.hash = r);
   app.refresh = rerender;
   window.addEventListener('hashchange', route);

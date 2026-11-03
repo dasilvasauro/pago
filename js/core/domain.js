@@ -463,3 +463,74 @@ export function walletName(S, ref) {
   const inst = w.institutionId ? S.byId.get(w.institutionId) : null;
   return inst && !w.name.toLowerCase().includes(inst.name.toLowerCase()) ? `${w.name} ${inst.name}` : w.name;
 }
+
+/* ---------- Prioridade e sugestão de pagamento ----------
+   Regras simples e explicáveis (sem IA). Cada compromisso pendente ganha uma pontuação:
+   - prioridade marcada (essencial > importante > normal);
+   - tipo: parcela de acordo (atrasar pode desfazer o acordo) e fatura (o saldo vai para o rotativo);
+   - atraso (quanto mais atrasada, mais urgente; essencial atrasada há 15+ dias pode ter corte);
+   - proximidade do vencimento.
+   Depois, o dinheiro disponível é distribuído na ordem da pontuação até o próximo recebimento. */
+export const PRIORITY = { normal: 'Normal', importante: 'Importante', essencial: 'Essencial' };
+const PW = { essencial: 3, importante: 2, normal: 1 };
+
+export function prioOf(o) {
+  if (o.src?.priority) return o.src.priority;
+  return o.kind === 'plan' && o.src?.kind === 'acordo' ? 'importante' : 'normal';
+}
+
+export function nextIncome(S, today) {
+  const ym = ymOf(today);
+  return obligations(S, ym, addMonths(ym, 2), today).find((o) => o.dir === 'in' && !o.paid && o.date >= today) || null;
+}
+
+export function paymentPlan(S, today, available) {
+  const ni = nextIncome(S, today);
+  const horizon = ni ? ni.date : addDays(today, 15);
+  const ym = ymOf(today);
+  const items = obligations(S, addMonths(ym, -24), ymOf(horizon), today)
+    .filter((o) => o.dir === 'out' && !o.paid && o.date <= horizon && dueAmount(o) > 0 && o.ref?.k !== 'c')
+    .map((o) => {
+      const prio = prioOf(o);
+      const late = daysBetween(o.date, today);
+      const reasons = [];
+      let score = PW[prio] * 100;
+      if (prio === 'essencial') reasons.push('Serviço essencial');
+      if (o.kind === 'plan') {
+        score += 60;
+        reasons.push(o.src?.kind === 'acordo' ? 'Parcela de acordo: atrasar pode desfazer o acordo' : 'Parcela: atraso gera multa e juros');
+      }
+      if (o.kind === 'invoice') {
+        score += 50;
+        reasons.push('Fatura: o que ficar sem pagar vai para o rotativo, com juros altos');
+      }
+      if (late > 0) {
+        score += Math.min(60, late);
+        reasons.push(`Atrasada há ${late} ${late === 1 ? 'dia' : 'dias'}`);
+        if (prio === 'essencial' && late >= 15) {
+          score += 40;
+          reasons.push('Pode haver corte do serviço');
+        }
+      } else {
+        const until = -late;
+        score += Math.max(0, 30 - until);
+        reasons.push(until === 0 ? 'Vence hoje' : until === 1 ? 'Vence amanhã' : `Vence em ${until} dias`);
+      }
+      return { o, prio, score, amount: dueAmount(o), late, reasons, partialOk: o.kind === 'invoice' };
+    })
+    .sort((a, b) => b.score - a.score || a.o.date.localeCompare(b.o.date));
+  let left = Math.max(0, available);
+  const now = [];
+  const later = [];
+  for (const it of items) {
+    if (it.amount <= left) {
+      now.push({ ...it, pay: it.amount });
+      left -= it.amount;
+    } else if (it.partialOk && left > 0) {
+      now.push({ ...it, pay: left, partial: true });
+      later.push({ ...it, amount: it.amount - left, rest: true });
+      left = 0;
+    } else later.push(it);
+  }
+  return { horizon, nextIncome: ni, available, now, later, totalNow: sum(now, (x) => x.pay), totalLater: sum(later, (x) => x.amount), left };
+}
