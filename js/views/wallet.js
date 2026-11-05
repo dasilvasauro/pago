@@ -1,5 +1,5 @@
 import * as store from '../core/store.js';
-import { balances, cardInfo, position, obligations, piggyInfo, ACCOUNT_KINDS, VOUCHER_KINDS, INVEST_KINDS } from '../core/domain.js';
+import { balances, cardInfo, position, obligations, piggyInfo, payRefAt, cardDue, ACCOUNT_KINDS, VOUCHER_KINDS, INVEST_KINDS } from '../core/domain.js';
 import { today } from '../lib/clock.js';
 import { esc, money, fmtDay, fmtMonth, fmtDate, fmtDateHuman, fmtMonthShort, addMonths, ymOf } from '../lib/util.js';
 import { icon, tip, sheet, moneyInput, readMoney, opt, seg, field, toast, confirmDialog, colorPicker, COLORS, bindMoney } from '../ui/ui.js';
@@ -487,8 +487,20 @@ function openCard(id, preset = {}) {
           <label class="field"><span>Dia de fechamento ${tip('Compras feitas a partir deste dia entram na fatura seguinte.')}</span><input name="closingDay" type="number" min="1" max="31" value="${c.closingDay}" required inputmode="numeric"></label>
           <label class="field"><span>Dia de vencimento</span><input name="dueDay" type="number" min="1" max="31" value="${c.dueDay}" required inputmode="numeric"></label>
         </div>
-        <span class="field-label">Próxima fatura a pagar ${tip('Valor da fatura que você vai pagar agora (já fechada ou ainda aberta). Uma fatura é a própria dívida do cartão.')}</span>
+        <details class="hist"${c.prevAmount ? ' open' : ''}>
+          <summary>Fatura anterior (paga ou paga em parte)</summary>
+          <div class="hist-body">
+            <p class="form-meta">Só para constar: não mexe no saldo das contas, porque o pagamento já aconteceu. Se foi paga em parte, o restante entra sozinho na fatura seguinte.</p>
+            ${field('Fatura de', `<input name="prevRef" type="month" value="${c.prevRef || addMonths(ymOf(td), -1)}">`, 'Mês em que a fatura fechou.')}
+            <div class="grid2">
+              <div><span class="field-label">Valor da fatura</span>${moneyInput('prevAmount', c.prevAmount || 0)}</div>
+              <div><span class="field-label">Quanto foi pago</span>${moneyInput('prevPaid', c.prevPaid || 0)}</div>
+            </div>
+          </div>
+        </details>
+        <span class="field-label">Compras na fatura atual ${tip('Valor das compras da fatura que você vai pagar agora. Não inclua o saldo que veio da fatura anterior: ele é somado sozinho.')}</span>
         ${moneyInput('openInv', c.openInv || 0)}
+        <p class="form-meta" data-cardsum></p>
         <div class="grid2">
           <div><span class="field-label">Parcelas futuras ${tip('Soma das parcelas que já estão programadas para as faturas seguintes.')}</span>${moneyInput('openRest', c.openRest || 0)}</div>
           <label class="field"><span>Em quantos meses</span><input name="openRestN" type="number" min="1" max="48" value="${c.openRestN || 1}" inputmode="numeric"></label>
@@ -514,6 +526,39 @@ function openCard(id, preset = {}) {
         }),
       );
       el.querySelector('[data-del]')?.addEventListener('click', () => removeWallet(id, 'c', close));
+      // Resumo ao vivo: de onde vem o valor da fatura atual.
+      const sumUp = () => {
+        const out = el.querySelector('[data-cardsum]');
+        if (!out || kind !== 'credito') return;
+        const prevAmount = Math.abs(readMoney(f.prevAmount));
+        const prevPaid = Math.min(prevAmount, Math.abs(readMoney(f.prevPaid)));
+        const inv = Math.abs(readMoney(f.openInv));
+        const cd = Number(f.closingDay.value) || 1;
+        const dd = Number(f.dueDay.value) || 10;
+        const tmp = { closingDay: cd, dueDay: dd };
+        const prevRef = f.prevRef.value;
+        let cur = payRefAt(tmp, f.openingDate.value || td);
+        if (prevAmount && prevRef && cur <= prevRef) cur = addMonths(prevRef, 1);
+        const carry = prevAmount ? prevAmount - prevPaid : 0;
+        const prevDue = prevAmount && prevRef ? cardDue(tmp, prevRef) : null;
+        out.textContent = prevAmount
+          ? carry > 0
+            ? `Fatura de ${fmtMonth(cur).toLowerCase()}, com vencimento em ${fmtDate(cardDue(tmp, cur))}: ${money(carry)} da fatura anterior + ${money(inv)} em compras = ${money(carry + inv)}.${prevDue >= td ? ` Até ${fmtDate(prevDue)} o restante ainda aparece na fatura anterior.` : ''}`
+            : `Fatura anterior quitada. Fatura de ${fmtMonth(cur).toLowerCase()}: ${money(inv)}.`
+          : inv
+            ? `Fatura de ${fmtMonth(cur).toLowerCase()}, com vencimento em ${fmtDate(cardDue(tmp, cur))}: ${money(inv)}.`
+            : '';
+      };
+      const wireSum = () => {
+        ['prevAmount', 'prevPaid', 'openInv'].forEach((k) => f[k]?.addEventListener('money', sumUp));
+        ['prevRef', 'closingDay', 'dueDay', 'openingDate'].forEach((k) => {
+          f[k]?.addEventListener('input', sumUp);
+          f[k]?.addEventListener('change', sumUp);
+        });
+        sumUp();
+      };
+      wireSum();
+      f.querySelectorAll('input[name=kind]').forEach((r) => r.addEventListener('change', () => setTimeout(wireSum, 0)));
       f.onsubmit = async (e) => {
         e.preventDefault();
         const data = { kind, name: f.name.value.trim(), institutionId: f.institutionId.value, archived: !!c.archived };
@@ -531,6 +576,13 @@ function openCard(id, preset = {}) {
             openingDate: f.openingDate.value,
             priority: f.querySelector('input[name=priority]:checked')?.value || 'normal',
           });
+        if (kind === 'credito') {
+          const prevAmount = Math.abs(readMoney(f.prevAmount));
+          const prevPaid = Math.abs(readMoney(f.prevPaid));
+          if (prevPaid > prevAmount) return toast('O valor pago não pode passar do valor da fatura.');
+          if (prevAmount && !f.prevRef.value) return toast('Informe o mês da fatura anterior.');
+          Object.assign(data, prevAmount ? { prevRef: f.prevRef.value, prevAmount, prevPaid } : { prevRef: '', prevAmount: 0, prevPaid: 0 });
+        }
         await store.save('card', data, id);
         close();
         toast('Cartão salvo');
@@ -539,7 +591,7 @@ function openCard(id, preset = {}) {
   });
 }
 
-const ST = { paga: 'Paga', aberta: 'Aberta', fechada: 'Fechada', vencida: 'Vencida' };
+const ST = { paga: 'Paga', aberta: 'Aberta', fechada: 'Fechada', vencida: 'Vencida', parcial: 'Paga em parte' };
 
 function cardDetail(id) {
   const S = store.snapshot();
@@ -564,7 +616,7 @@ function cardDetail(id) {
         <button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Remover</button>
       </div>
       <h4 class="sub">Faturas</h4>
-      ${invs.length ? `<ul class="inv-list">${invs.map((i) => `<li><button type="button" data-inv="${i.ref}"><span><b>${fmtMonth(i.ref)}</b><small>Vence ${fmtDate(i.due)}</small></span><span class="pill ${i.status === 'paga' ? 'ok' : i.status === 'vencida' ? 'late' : ''}">${ST[i.status]}</span><span class="amt">${money(i.amount)}${i.paid && i.remaining ? `<small>falta ${money(i.remaining)}</small>` : ''}</span></button></li>`).join('')}</ul>` : `<p class="empty">Nenhuma fatura.</p>`}`,
+      ${invs.length ? `<ul class="inv-list">${invs.map((i) => `<li><button type="button" data-inv="${i.ref}"><span><b>${fmtMonth(i.ref)}</b><small>Vence ${fmtDate(i.due)}</small></span><span class="pill ${i.status === 'paga' ? 'ok' : i.status === 'vencida' ? 'late' : i.status === 'parcial' ? 'part' : ''}">${ST[i.status]}</span><span class="amt">${money(i.amount)}${i.carried ? `<small>${money(i.carried)} foi para a seguinte</small>` : i.paid && i.remaining ? `<small>falta ${money(i.remaining)}</small>` : ''}</span></button></li>`).join('')}</ul>` : `<p class="empty">Nenhuma fatura.</p>`}`,
     onMount(el, close) {
       el.querySelector('[data-edit]').onclick = () => {
         close();
@@ -598,7 +650,8 @@ function invoiceItems(card, inv) {
         })
         .join('')}
         <li class="total"><span>Total</span><span>${money(inv.amount)}</span></li>
-        ${inv.paid ? `<li><span>Pago</span><span class="pos">${money(inv.paid)}</span></li>` : ''}</ul>`,
+        ${inv.paid ? `<li><span>Pago</span><span class="pos">${money(inv.paid)}</span></li>` : ''}
+        ${inv.carried ? `<li><span>Foi para a fatura seguinte</span><span>${money(inv.carried)}</span></li>` : ''}</ul>`,
   });
 }
 

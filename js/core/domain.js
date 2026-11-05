@@ -9,7 +9,7 @@
 //   - Contas em atraso          -> contas recorrentes vencidas e não pagas (luz, água, internet...)
 // Assim, todo lançamento do diário altera a dívida automaticamente: um salário que cai numa
 // conta negativa abate o cheque especial sem nenhum passo extra.
-import { addMonths, ymOf, clampDay, addDays, monthsBetween, splitParts, daysBetween, sum, isoOf } from '../lib/util.js';
+import { addMonths, ymOf, clampDay, addDays, monthsBetween, splitParts, daysBetween, sum, isoOf, MONTHS } from '../lib/util.js';
 
 export const ACCOUNT_KINDS = {
   corrente: 'Conta corrente',
@@ -63,7 +63,7 @@ function openings(S) {
   const m = new Map();
   for (const a of S.acct) m.set('a:' + a.id, { date: a.openingDate, amount: a.opening || 0 });
   for (const c of S.card)
-    if (c.kind === 'credito') m.set('c:' + c.id, { date: c.openingDate, amount: (c.openInv || 0) + (c.openRest || 0) });
+    if (c.kind === 'credito') m.set('c:' + c.id, { date: c.openingDate, amount: (c.openInv || 0) + (c.openRest || 0) + Math.max(0, (c.prevAmount || 0) - (c.prevPaid || 0)) * (c.prevRef ? 1 : 0) });
   return m;
 }
 
@@ -192,6 +192,20 @@ export function payRefAt(card, date) {
   return cardDue(card, prev) >= date ? prev : r;
 }
 
+// Fatura registrada no cadastro (histórico): a última fatura fechada, com quanto foi pago.
+// Entra só no cartão, sem mexer em nenhuma conta, porque o pagamento já está no saldo delas.
+export const histRef = (card) => (card.prevAmount > 0 && card.prevRef ? card.prevRef : null);
+function currentRef(card) {
+  const pay = payRefAt(card, card.openingDate);
+  const h = histRef(card);
+  return h && pay <= h ? addMonths(h, 1) : pay;
+}
+
+// Regras das faturas:
+// - cada pagamento vale para as faturas que vencem a partir da data dele (as mais antigas primeiro);
+// - fatura vencida e paga EM PARTE: o restante vai para a fatura seguinte ("Saldo da fatura de ...");
+// - fatura vencida sem nenhum pagamento continua em aberto, como atrasada;
+// - pagamento feito depois do vencimento quita primeiro as faturas atrasadas.
 export function cardInvoices(S, card, today) {
   const charges = new Map();
   const add = (ref, amount, item) => {
@@ -201,15 +215,20 @@ export function cardInvoices(S, card, today) {
     charges.set(ref, c);
   };
   const od = card.openingDate;
-  if (card.openInv) add(payRefAt(card, od), card.openInv, { label: 'Saldo inicial', amount: card.openInv, date: od });
+  const credits = [];
+  const h = histRef(card);
+  if (h) {
+    add(h, card.prevAmount, { label: 'Fatura registrada no cadastro', amount: card.prevAmount, date: cardClose(card, h), hist: true });
+    if (card.prevPaid > 0) credits.push({ date: cardDue(card, h), amount: Math.min(card.prevPaid, card.prevAmount), hist: true });
+  }
+  const cur = currentRef(card);
+  if (card.openInv) add(cur, card.openInv, { label: 'Saldo inicial', amount: card.openInv, date: od });
   if (card.openRest) {
     const n = Math.max(1, card.openRestN || 1);
-    const r0 = addMonths(payRefAt(card, od), 1);
     splitParts(card.openRest, n).forEach((a, i) =>
-      add(addMonths(r0, i), a, { label: `Saldo parcelado ${i + 1}/${n}`, amount: a, date: od }),
+      add(addMonths(cur, i + 1), a, { label: `Saldo parcelado ${i + 1}/${n}`, amount: a, date: od }),
     );
   }
-  let credits = 0;
   const key = 'c:' + card.id;
   for (const t of S.tx) {
     if (t.date < od) continue;
@@ -219,21 +238,77 @@ export function cardInvoices(S, card, today) {
         const n = t.type === 'saida' ? Math.max(1, t.installments || 1) : 1;
         const r0 = cardRef(card, t.date);
         splitParts(d, n).forEach((a, i) => add(addMonths(r0, i), a, { tx: t, i: i + 1, n, amount: a, date: t.date }));
-      } else if (t.date <= today) credits += -d;
+      } else if (t.date <= today) credits.push({ date: t.date, amount: -d });
     }
   }
-  let pool = credits;
-  const list = [...charges.keys()].sort().map((ref) => {
-    const c = charges.get(ref);
-    const paid = Math.min(c.amount, pool);
-    pool -= paid;
+  credits.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  let ci = 0;
+  let cleft = credits[0]?.amount || 0;
+  // Consome pagamentos com data até "limit" e devolve quanto foi usado (até "need").
+  const take = (need, limit) => {
+    let got = 0;
+    while (ci < credits.length && got < need && credits[ci].date <= limit) {
+      const x = Math.min(cleft, need - got);
+      got += x;
+      cleft -= x;
+      if (cleft <= 0) {
+        ci++;
+        cleft = credits[ci]?.amount || 0;
+      }
+    }
+    return got;
+  };
+
+  const refs = [...charges.keys()].sort();
+  const list = [];
+  const overdue = [];
+  let carry = 0;
+  let carryFrom = null;
+  for (let i = 0; i < refs.length || carry > 0; i++) {
+    const ref = refs[i] || addMonths(list[list.length - 1].ref, 1);
     const close = cardClose(card, ref);
     const due = cardDue(card, ref);
-    const remaining = c.amount - paid;
-    const status = remaining <= 0 ? 'paga' : today < close ? 'aberta' : today > due ? 'vencida' : 'fechada';
-    return { ref, close, due, amount: c.amount, paid, remaining, items: c.items, status };
-  });
-  list.credit = pool; // pagamentos acima do devido
+    // Pagamentos atrasados quitam primeiro as faturas vencidas.
+    for (const o of overdue) {
+      if (o.remaining <= 0) continue;
+      const got = take(o.remaining, due);
+      o.paid += got;
+      o.remaining -= got;
+      if (o.remaining <= 0) o.status = 'paga';
+    }
+    const c = charges.get(ref) || { amount: 0, items: [] };
+    const items = carry > 0 ? [{ label: `Saldo da fatura de ${MONTHS[Number(carryFrom.slice(5)) - 1]}`, amount: carry, date: cardDue(card, carryFrom), carry: true }, ...c.items] : c.items;
+    const amount = c.amount + carry;
+    carry = 0;
+    const paid = take(amount, due);
+    let remaining = amount - paid;
+    let carried = 0;
+    let status;
+    if (remaining <= 0) status = 'paga';
+    else if (today < close) status = 'aberta';
+    else if (today <= due) status = 'fechada';
+    else if (paid > 0) {
+      status = 'parcial';
+      carried = carry = remaining;
+      carryFrom = ref;
+      remaining = 0;
+    } else status = 'vencida';
+    const inv = { ref, close, due, amount, paid, remaining, carried, items, status };
+    list.push(inv);
+    if (status === 'vencida') overdue.push(inv);
+  }
+  // Pagamentos que ainda sobraram vão para atrasadas e, depois, viram crédito no cartão.
+  for (const o of overdue) {
+    if (o.remaining <= 0) continue;
+    const got = take(o.remaining, '9999-12-31');
+    o.paid += got;
+    o.remaining -= got;
+    if (o.remaining <= 0) o.status = 'paga';
+  }
+  let credit = cleft;
+  for (let j = ci + 1; j < credits.length; j++) credit += credits[j].amount;
+  list.credit = ci < credits.length ? credit : 0;
   return list;
 }
 
@@ -396,6 +471,7 @@ export function obligations(S, fromYM, toYM, today) {
         remaining: inv.remaining,
         paid: inv.remaining <= 0,
         partial: inv.paid > 0 && inv.remaining > 0,
+        carried: inv.carried,
         src: c,
         inv,
       });

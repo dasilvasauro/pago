@@ -813,6 +813,15 @@ body.has-report { overflow: hidden; }
 .sug-side small { font-size: 11.5px; color: var(--muted); }
 @media (max-width: 559px) { .sug-top { grid-template-columns: minmax(0, 1fr); } }
 
+.pill.part { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+details.hist { border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+details.hist summary { cursor: pointer; padding: 11px 14px; font-size: 14px; font-weight: 700; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+details.hist summary::-webkit-details-marker { display: none; }
+details.hist summary::after { content: '+'; color: var(--muted); font-weight: 800; }
+details.hist[open] summary::after { content: '−'; }
+.hist-body { display: grid; gap: 12px; padding: 0 14px 14px; }
+.hist-body .money-in, .hist-body .pick { background: var(--surface); }
+
 /* ---------- Seletores personalizados ---------- */
 .pick-native { position: absolute !important; width: 1px !important; height: 1px !important; opacity: 0; pointer-events: none; clip-path: inset(50%); }
 .pick {

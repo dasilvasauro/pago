@@ -55,7 +55,7 @@ export function render(el) {
         ? `<ul class="ob-list">${obs
             .map((o) => {
               const late = !o.paid && o.date < td;
-              const state = o.reneg ? `<span class="pill">${icon('swap')}Renegociada</span>` : o.settled ? `<span class="pill ok">${icon('check')}Pago fora do app</span>` : o.paid ? `<span class="pill ok">${icon('check')}${o.dir === 'in' ? 'Recebido' : 'Pago'}</span>` : late ? `<span class="pill late">Atrasado</span>` : `<span class="pill">${relDay(o.date, td)}</span>`;
+              const state = o.reneg ? `<span class="pill">${icon('swap')}Renegociada</span>` : o.carried ? `<span class="pill part">Paga em parte, ${money(o.carried)} foi para a seguinte</span>` : o.settled ? `<span class="pill ok">${icon('check')}Pago fora do app</span>` : o.paid ? `<span class="pill ok">${icon('check')}${o.dir === 'in' ? 'Recebido' : 'Pago'}</span>` : late ? `<span class="pill late">Atrasado</span>` : `<span class="pill">${relDay(o.date, td)}</span>`;
               return `<li class="${o.paid ? 'done' : ''}">
                 <div class="ob-date"><b>${o.date.slice(8)}</b><span>${fmtDay(o.date).split(' ')[1]}</span></div>
                 <div class="ob-main">${o.kind === 'bill' && (!o.paid || o.settled) ? `<button type="button" class="ob-title" data-occ="${esc(o.id)}" aria-label="Ajustar ${esc(o.title)} deste mês">${esc(o.title)}${icon('edit', 'sm')}</button>` : `<b>${esc(o.title)}</b>`}
@@ -63,7 +63,7 @@ export function render(el) {
                   <span class="ob-pills">${state}${o.dir === 'out' && !o.paid ? prioPill(prioOf(o)) : ''}${o.edited ? '<span class="pill">Ajustado</span>' : ''}</span>
                 </div>
                 <div class="ob-side"><span class="amt ${o.dir === 'in' ? 'pos' : ''}">${money(o.kind === 'invoice' && !o.paid ? o.remaining : o.amount)}</span>
-                  ${o.reneg || o.settled ? '' : `<button type="button" class="btn small ${o.paid ? 'ghost' : ''}" data-ob="${esc(o.id)}">${o.paid ? 'Ver' : o.dir === 'in' ? 'Receber' : 'Pagar'}</button>`}</div>
+                  ${o.reneg || o.settled || (o.kind === 'invoice' && o.paid) ? '' : `<button type="button" class="btn small ${o.paid ? 'ghost' : ''}" data-ob="${esc(o.id)}">${o.paid ? 'Ver' : o.dir === 'in' ? 'Receber' : 'Pagar'}</button>`}</div>
               </li>`;
             })
             .join('')}</ul>`
