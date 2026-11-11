@@ -275,11 +275,17 @@ Os ajustes valem para o calendário, as contas em atraso, a dívida total, a pro
    - Fatura pode ser paga em parte.
    - O que não couber aparece em "Pode esperar", com a data do próximo recebimento.
 
+**Datas das faturas.**
+
+- **Padrão do cartão:** cada cartão tem dia de fechamento e dia de vencimento. Compras a partir do fechamento vão para a fatura seguinte. Se o vencimento é num dia menor que o fechamento (fecha 28, vence 5), a fatura vence no mês seguinte.
+- **Nome da fatura:** as faturas são chamadas pelo mês de vencimento, como nos bancos ("fatura de dezembro" vence em dezembro). O formulário do cartão mostra quando a fatura aberta hoje fecha e vence.
+- **Fatura com data diferente:** quando o banco muda as datas de uma fatura específica (feriado, fim de semana), abra o cartão, toque na fatura e ajuste fechamento e vencimento só dela. Mudar o fechamento muda quais compras entram nela. "Voltar ao padrão" desfaz.
+
 **Fatura paga em parte.** Se uma fatura vencer com só parte paga, o restante passa sozinho para a fatura seguinte, como "Saldo da fatura de outubro". Juros do rotativo, quando vierem, entram como saída no cartão, na categoria Juros e tarifas.
 
 Uma fatura vencida sem nenhum pagamento continua como atrasada. Um pagamento feito depois do vencimento quita primeiro as faturas atrasadas.
 
-**Fatura anterior no cadastro do cartão.** Ao cadastrar um cartão, abra "Fatura anterior (paga ou paga em parte)" e informe o mês, o valor da fatura e quanto foi pago.
+**Fatura anterior no cadastro do cartão.** Ao cadastrar um cartão, abra "Fatura anterior (paga ou paga em parte)" e informe o vencimento dela, o valor e quanto foi pago.
 
 - **Histórico:** fica registrado no cartão, sem mexer no saldo de nenhuma conta, porque esse pagamento já aconteceu.
 - **Restante:** entra na fatura atual.

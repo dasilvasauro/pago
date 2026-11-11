@@ -211,7 +211,7 @@ function sources() {
     groups.push(['Cartões', cards.flatMap((c) => {
       const info = cardInfo(S, c, td, bal);
       const out = [];
-      if (info.current) out.push({ label: `Fatura ${c.name} (${fmtMonthShort(info.current.ref)})`, v: info.current.remaining || info.current.amount });
+      if (info.current) out.push({ label: `Fatura ${c.name} (${fmtMonthShort(ymOf(info.current.due))})`, v: info.current.remaining || info.current.amount });
       out.push({ label: `Dívida total ${c.name}`, v: Math.max(0, info.outstanding) });
       return out;
     })]);

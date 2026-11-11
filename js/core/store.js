@@ -200,7 +200,7 @@ export const stats = () => {
 
 const view = (r) => ({ id: r.id, ...r.data, _by: r.by, _cb: r.cb, _ca: r.ca, _u: r.u });
 
-const TYPES = ['inst', 'acct', 'card', 'cat', 'tx', 'bill', 'plan', 'member', 'archive', 'occ'];
+const TYPES = ['inst', 'acct', 'card', 'cat', 'tx', 'bill', 'plan', 'member', 'archive', 'occ', 'cinv'];
 
 // Fotografia imutável do estado, reconstruída só quando algo muda.
 export function snapshot() {
@@ -228,6 +228,10 @@ export function snapshot() {
   S.cat.sort(byName);
   S.bill.sort((a, b) => (a.day || 0) - (b.day || 0));
   S.plan.sort(byName);
+  // Datas ajustadas de faturas específicas ficam acessíveis no próprio cartão (_inv[ref]).
+  const inv = {};
+  for (const r of S.cinv) (inv[r.cardId] ||= {})[r.ref] = r;
+  for (const c of S.card) c._inv = inv[c.id] || null;
   S.byId = byId;
   snap = Object.freeze(S);
   snapV = version;

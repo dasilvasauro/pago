@@ -1,5 +1,5 @@
 import * as store from '../core/store.js';
-import { balances, cardInfo, position, obligations, piggyInfo, payRefAt, cardDue, ACCOUNT_KINDS, VOUCHER_KINDS, INVEST_KINDS } from '../core/domain.js';
+import { balances, cardInfo, position, obligations, piggyInfo, payRefAt, cardDue, cardClose, cardRef, defaultClose, defaultDue, refByDueMonth, invMonth, ACCOUNT_KINDS, VOUCHER_KINDS, INVEST_KINDS } from '../core/domain.js';
 import { today } from '../lib/clock.js';
 import { esc, money, fmtDay, fmtMonth, fmtDate, fmtDateHuman, fmtMonthShort, addMonths, ymOf } from '../lib/util.js';
 import { icon, tip, sheet, moneyInput, readMoney, opt, seg, field, toast, confirmDialog, colorPicker, COLORS, bindMoney } from '../ui/ui.js';
@@ -484,14 +484,15 @@ function openCard(id, preset = {}) {
       ? field('Conta vinculada', `<select name="accountId" required><option value="">Selecionar</option>${accts.map((a) => opt(a.id, a.name, a.id === c.accountId || (!c.accountId && a.institutionId === c.institutionId))).join('')}</select>`, 'Compras no débito saem desta conta.')
       : `${field('Limite', moneyInput('limit', c.limit || 0))}
         <div class="grid2">
-          <label class="field"><span>Dia de fechamento ${tip('Compras feitas a partir deste dia entram na fatura seguinte.')}</span><input name="closingDay" type="number" min="1" max="31" value="${c.closingDay}" required inputmode="numeric"></label>
-          <label class="field"><span>Dia de vencimento</span><input name="dueDay" type="number" min="1" max="31" value="${c.dueDay}" required inputmode="numeric"></label>
+          <label class="field"><span>Dia de fechamento ${tip('Dia em que a fatura fecha. Compras feitas a partir dele entram na fatura seguinte. Costuma ser de 7 a 10 dias antes do vencimento.')}</span><input name="closingDay" type="number" min="1" max="31" value="${c.closingDay}" required inputmode="numeric"></label>
+          <label class="field"><span>Dia de vencimento ${tip('Se o vencimento for num dia menor que o do fechamento (ex.: fecha 28, vence 5), a fatura vence no mês seguinte ao fechamento. Para uma fatura com data diferente, ajuste no detalhe do cartão.')}</span><input name="dueDay" type="number" min="1" max="31" value="${c.dueDay}" required inputmode="numeric"></label>
         </div>
+        <p class="form-meta" data-cardprev></p>
         <details class="hist"${c.prevAmount ? ' open' : ''}>
           <summary>Fatura anterior (paga ou paga em parte)</summary>
           <div class="hist-body">
             <p class="form-meta">Só para constar: não mexe no saldo das contas, porque o pagamento já aconteceu. Se foi paga em parte, o restante entra sozinho na fatura seguinte.</p>
-            ${field('Fatura de', `<input name="prevRef" type="month" value="${c.prevRef || addMonths(ymOf(td), -1)}">`, 'Mês em que a fatura fechou.')}
+            ${field('Vencimento da fatura anterior', `<input name="prevDue" type="date" value="${c.prevRef ? cardDue(c, c.prevRef) : defaultDue(c, addMonths(payRefAt(c, td), -1))}">`, 'Data em que ela venceu, como aparece na fatura do banco.')}
             <div class="grid2">
               <div><span class="field-label">Valor da fatura</span>${moneyInput('prevAmount', c.prevAmount || 0)}</div>
               <div><span class="field-label">Quanto foi pago</span>${moneyInput('prevPaid', c.prevPaid || 0)}</div>
@@ -535,23 +536,39 @@ function openCard(id, preset = {}) {
         const inv = Math.abs(readMoney(f.openInv));
         const cd = Number(f.closingDay.value) || 1;
         const dd = Number(f.dueDay.value) || 10;
-        const tmp = { closingDay: cd, dueDay: dd };
-        const prevRef = f.prevRef.value;
+        const tmp = { closingDay: cd, dueDay: dd, _inv: c._inv };
+        const open = cardRef(tmp, td);
+        el.querySelector('[data-cardprev]').textContent = `Com esses dias, a fatura aberta hoje fecha em ${fmtDate(cardClose(tmp, open))} e vence em ${fmtDate(cardDue(tmp, open))} (fatura de ${fmtMonth(invMonth(tmp, open)).toLowerCase()}).`;
+        const prevDue = prevAmount && f.prevDue.value ? f.prevDue.value : null;
+        const prevRef = prevDue ? refByDueMonth(tmp, ymOf(prevDue)) : null;
         let cur = payRefAt(tmp, f.openingDate.value || td);
-        if (prevAmount && prevRef && cur <= prevRef) cur = addMonths(prevRef, 1);
+        if (prevRef && cur <= prevRef) cur = addMonths(prevRef, 1);
         const carry = prevAmount ? prevAmount - prevPaid : 0;
-        const prevDue = prevAmount && prevRef ? cardDue(tmp, prevRef) : null;
+        const name = `Fatura de ${fmtMonth(invMonth(tmp, cur)).toLowerCase()}`;
         out.textContent = prevAmount
           ? carry > 0
-            ? `Fatura de ${fmtMonth(cur).toLowerCase()}, com vencimento em ${fmtDate(cardDue(tmp, cur))}: ${money(carry)} da fatura anterior + ${money(inv)} em compras = ${money(carry + inv)}.${prevDue >= td ? ` Até ${fmtDate(prevDue)} o restante ainda aparece na fatura anterior.` : ''}`
-            : `Fatura anterior quitada. Fatura de ${fmtMonth(cur).toLowerCase()}: ${money(inv)}.`
+            ? `${name}, com vencimento em ${fmtDate(cardDue(tmp, cur))}: ${money(carry)} da fatura anterior + ${money(inv)} em compras = ${money(carry + inv)}.${prevDue >= td ? ` Até ${fmtDate(prevDue)} o restante ainda aparece na fatura anterior.` : ''}`
+            : `Fatura anterior quitada. ${name}: ${money(inv)}.`
           : inv
-            ? `Fatura de ${fmtMonth(cur).toLowerCase()}, com vencimento em ${fmtDate(cardDue(tmp, cur))}: ${money(inv)}.`
+            ? `${name}, com vencimento em ${fmtDate(cardDue(tmp, cur))}: ${money(inv)}.`
             : '';
       };
+      // Enquanto o vencimento anterior não for escolhido à mão, ele acompanha os dias do cartão.
+      let prevTouched = !!c.prevRef;
+      const syncPrev = () => {
+        if (prevTouched || !f.prevDue || kind !== 'credito') return;
+        const tmp = { closingDay: Number(f.closingDay.value) || 1, dueDay: Number(f.dueDay.value) || 10 };
+        f.prevDue.value = defaultDue(tmp, addMonths(payRefAt(tmp, f.openingDate.value || td), -1));
+      };
       const wireSum = () => {
+        prevTouched = !!c.prevRef;
+        f.prevDue?.addEventListener('change', () => (prevTouched = true));
+        ['closingDay', 'dueDay', 'openingDate'].forEach((k) => {
+          f[k]?.addEventListener('input', syncPrev);
+          f[k]?.addEventListener('change', syncPrev);
+        });
         ['prevAmount', 'prevPaid', 'openInv'].forEach((k) => f[k]?.addEventListener('money', sumUp));
-        ['prevRef', 'closingDay', 'dueDay', 'openingDate'].forEach((k) => {
+        ['prevDue', 'closingDay', 'dueDay', 'openingDate'].forEach((k) => {
           f[k]?.addEventListener('input', sumUp);
           f[k]?.addEventListener('change', sumUp);
         });
@@ -580,10 +597,20 @@ function openCard(id, preset = {}) {
           const prevAmount = Math.abs(readMoney(f.prevAmount));
           const prevPaid = Math.abs(readMoney(f.prevPaid));
           if (prevPaid > prevAmount) return toast('O valor pago não pode passar do valor da fatura.');
-          if (prevAmount && !f.prevRef.value) return toast('Informe o mês da fatura anterior.');
-          Object.assign(data, prevAmount ? { prevRef: f.prevRef.value, prevAmount, prevPaid } : { prevRef: '', prevAmount: 0, prevPaid: 0 });
+          if (prevAmount && !f.prevDue.value) return toast('Informe o vencimento da fatura anterior.');
+          const prevRef = prevAmount ? refByDueMonth({ ...data, _inv: c._inv }, ymOf(f.prevDue.value)) : '';
+          Object.assign(data, prevAmount ? { prevRef, prevAmount, prevPaid } : { prevRef: '', prevAmount: 0, prevPaid: 0 });
+          data._prevDue = prevAmount ? f.prevDue.value : '';
         }
-        await store.save('card', data, id);
+        const prevDueWanted = data._prevDue;
+        delete data._prevDue;
+        const cid = await store.save('card', data, id);
+        // Vencimento informado diferente do padrão: fica como data ajustada daquela fatura.
+        if (prevDueWanted && prevDueWanted !== defaultDue(data, data.prevRef)) {
+          const oid = `ci_${cid}_${data.prevRef}`;
+          const prev = store.get(oid);
+          await store.save('cinv', { cardId: cid, ref: data.prevRef, close: prev?.close || '', due: prevDueWanted }, oid);
+        }
         close();
         toast('Cartão salvo');
       };
@@ -616,7 +643,7 @@ function cardDetail(id) {
         <button type="button" class="btn ghost danger-text" data-del>${icon('trash')}Remover</button>
       </div>
       <h4 class="sub">Faturas</h4>
-      ${invs.length ? `<ul class="inv-list">${invs.map((i) => `<li><button type="button" data-inv="${i.ref}"><span><b>${fmtMonth(i.ref)}</b><small>Vence ${fmtDate(i.due)}</small></span><span class="pill ${i.status === 'paga' ? 'ok' : i.status === 'vencida' ? 'late' : i.status === 'parcial' ? 'part' : ''}">${ST[i.status]}</span><span class="amt">${money(i.amount)}${i.carried ? `<small>${money(i.carried)} foi para a seguinte</small>` : i.paid && i.remaining ? `<small>falta ${money(i.remaining)}</small>` : ''}</span></button></li>`).join('')}</ul>` : `<p class="empty">Nenhuma fatura.</p>`}`,
+      ${invs.length ? `<ul class="inv-list">${invs.map((i) => `<li><button type="button" data-inv="${i.ref}"><span><b>${fmtMonth(invMonth(c, i.ref))}</b><small>Fecha ${fmtDay(i.close)}, vence ${fmtDate(i.due)}</small></span><span class="pill ${i.status === 'paga' ? 'ok' : i.status === 'vencida' ? 'late' : i.status === 'parcial' ? 'part' : ''}">${ST[i.status]}</span><span class="amt">${money(i.amount)}${i.carried ? `<small>${money(i.carried)} foi para a seguinte</small>` : i.paid && i.remaining ? `<small>falta ${money(i.remaining)}</small>` : ''}</span></button></li>`).join('')}</ul>` : `<p class="empty">Nenhuma fatura.</p>`}`,
     onMount(el, close) {
       el.querySelector('[data-edit]').onclick = () => {
         close();
@@ -628,21 +655,31 @@ function cardDetail(id) {
         openRenegotiate({ card: id });
       });
       el.querySelector('[data-calc]').onclick = () =>
-        info.current ? calcAdd({ label: `Fatura ${c.name} (${fmtMonthShort(info.current.ref)})`, v: info.current.remaining || info.current.amount }) : calcAdd({ label: `Dívida ${c.name}`, v: Math.max(0, info.outstanding) });
+        info.current ? calcAdd({ label: `Fatura ${c.name} (${fmtMonthShort(ymOf(info.current.due))})`, v: info.current.remaining || info.current.amount }) : calcAdd({ label: `Dívida ${c.name}`, v: Math.max(0, info.outstanding) });
       el.querySelector('[data-pay]')?.addEventListener('click', () => {
         const ob = obligations(S, info.current.due.slice(0, 7), info.current.due.slice(0, 7), td).find((o) => o.id === `i:${id}:${info.current.ref}`);
         if (ob) openPay(ob);
       });
-      el.querySelectorAll('[data-inv]').forEach((b) => (b.onclick = () => invoiceItems(c, info.invoices.find((i) => i.ref === b.dataset.inv))));
+      el.querySelectorAll('[data-inv]').forEach(
+        (b) =>
+          (b.onclick = () =>
+            invoiceItems(c, info.invoices.find((i) => i.ref === b.dataset.inv), () => {
+              close();
+              setTimeout(() => cardDetail(id), 240);
+            })),
+      );
     },
   });
 }
 
-function invoiceItems(card, inv) {
+function invoiceItems(card, inv, onChanged) {
   const S = store.snapshot();
+  const ov = card._inv?.[inv.ref] || null;
+  const dClose = defaultClose(card, inv.ref);
+  const dDue = defaultDue(card, inv.ref);
   sheet({
-    title: `Fatura de ${fmtMonth(inv.ref).toLowerCase()}`,
-    body: `<p class="sheet-text">Fecha em ${fmtDate(inv.close)}, vence em ${fmtDate(inv.due)}.</p>
+    title: `Fatura de ${fmtMonth(invMonth(card, inv.ref)).toLowerCase()}`,
+    body: `<p class="sheet-text">Fecha em ${fmtDate(inv.close)}, vence em ${fmtDate(inv.due)}.${ov ? ' Datas ajustadas para esta fatura.' : ''}</p>
       <ul class="parts">${inv.items
         .map((it) => {
           const label = it.label || it.tx.desc || S.byId.get(it.tx.categoryId)?.name || 'Compra';
@@ -651,7 +688,41 @@ function invoiceItems(card, inv) {
         .join('')}
         <li class="total"><span>Total</span><span>${money(inv.amount)}</span></li>
         ${inv.paid ? `<li><span>Pago</span><span class="pos">${money(inv.paid)}</span></li>` : ''}
-        ${inv.carried ? `<li><span>Foi para a fatura seguinte</span><span>${money(inv.carried)}</span></li>` : ''}</ul>`,
+        ${inv.carried ? `<li><span>Foi para a fatura seguinte</span><span>${money(inv.carried)}</span></li>` : ''}</ul>
+      <form class="form inv-dates" data-f>
+        <h4 class="sub">Datas desta fatura ${tip('Ajuste quando o banco mudar as datas de uma fatura específica, por feriado ou fim de semana. Mudar o fechamento muda quais compras entram nesta fatura. As outras seguem o padrão do cartão.')}</h4>
+        <div class="grid2">
+          <label class="field"><span>Fechamento</span><input name="close" type="date" value="${inv.close}" required></label>
+          <label class="field"><span>Vencimento</span><input name="due" type="date" value="${inv.due}" required></label>
+        </div>
+        <p class="form-meta">Padrão do cartão: fecha dia ${card.closingDay}, vence dia ${card.dueDay}.</p>
+        <div class="sheet-actions">${ov ? `<button type="button" class="btn ghost" data-reset>${icon('refresh')}Voltar ao padrão</button>` : '<span></span>'}<button class="btn primary">Salvar datas</button></div>
+      </form>`,
+    onMount(el, close) {
+      const f = el.querySelector('[data-f]');
+      const id = `ci_${card.id}_${inv.ref}`;
+      el.querySelector('[data-reset]')?.addEventListener('click', async () => {
+        await store.remove(id);
+        close();
+        toast('Datas da fatura voltaram ao padrão');
+        onChanged?.();
+      });
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        const c2 = f.close.value;
+        const d2 = f.due.value;
+        if (d2 <= c2) return toast('O vencimento precisa ser depois do fechamento.');
+        const prevClose = cardClose(card, addMonths(inv.ref, -1));
+        const nextClose = cardClose(card, addMonths(inv.ref, 1));
+        if (c2 <= prevClose || c2 >= nextClose) return toast(`O fechamento precisa ficar entre ${fmtDate(prevClose)} e ${fmtDate(nextClose)}, os fechamentos das faturas vizinhas.`);
+        const data = { cardId: card.id, ref: inv.ref, close: c2 !== dClose ? c2 : '', due: d2 !== dDue ? d2 : '' };
+        if (!data.close && !data.due) await store.remove(id);
+        else await store.save('cinv', data, id);
+        close();
+        toast('Datas da fatura salvas');
+        onChanged?.();
+      };
+    },
   });
 }
 

@@ -178,13 +178,27 @@ export function lateBills(S, date, paid = paidKeys(S, date), covered = coveredKe
 
 /* ---------- Cartões de crédito ----------
    ref = mês de fechamento da fatura. Compras a partir do dia de fechamento vão para a próxima. */
-export function cardRef(card, date) {
-  const ym = ymOf(date);
-  return date < clampDay(ym, card.closingDay) ? ym : addMonths(ym, 1);
-}
-export const cardClose = (card, ref) => clampDay(ref, card.closingDay);
-export const cardDue = (card, ref) =>
+// Datas padrão vêm dos dias do cartão; uma fatura específica pode ter fechamento e vencimento
+// ajustados (registro "cinv"), por exemplo quando o banco muda a data por feriado.
+const invOv = (card, ref) => card._inv?.[ref] || null;
+export const defaultClose = (card, ref) => clampDay(ref, card.closingDay);
+export const defaultDue = (card, ref) =>
   card.dueDay > card.closingDay ? clampDay(ref, card.dueDay) : clampDay(addMonths(ref, 1), card.dueDay);
+export const cardClose = (card, ref) => invOv(card, ref)?.close || defaultClose(card, ref);
+export const cardDue = (card, ref) => invOv(card, ref)?.due || defaultDue(card, ref);
+// Fatura em que uma compra entra: a primeira que fecha depois da data da compra.
+export function cardRef(card, date) {
+  let r = addMonths(ymOf(date), -1);
+  for (let i = 0; i < 24 && date >= cardClose(card, r); i++) r = addMonths(r, 1);
+  return r;
+}
+// Faturas são chamadas pelo mês de vencimento, como nos bancos ("fatura de dezembro" vence em dezembro).
+export const invMonth = (card, ref) => ymOf(cardDue(card, ref));
+// Fatura cujo vencimento cai no mês informado.
+export function refByDueMonth(card, ym) {
+  for (const r of [addMonths(ym, -1), ym, addMonths(ym, -2)]) if (ymOf(cardDue(card, r)) === ym) return r;
+  return card.dueDay > card.closingDay ? ym : addMonths(ym, -1);
+}
 // Próxima fatura a pagar numa data (pode ser uma já fechada e ainda não vencida).
 export function payRefAt(card, date) {
   const r = cardRef(card, date);
@@ -278,7 +292,7 @@ export function cardInvoices(S, card, today) {
       if (o.remaining <= 0) o.status = 'paga';
     }
     const c = charges.get(ref) || { amount: 0, items: [] };
-    const items = carry > 0 ? [{ label: `Saldo da fatura de ${MONTHS[Number(carryFrom.slice(5)) - 1]}`, amount: carry, date: cardDue(card, carryFrom), carry: true }, ...c.items] : c.items;
+    const items = carry > 0 ? [{ label: `Saldo da fatura de ${MONTHS[Number(invMonth(card, carryFrom).slice(5)) - 1]}`, amount: carry, date: cardDue(card, carryFrom), carry: true }, ...c.items] : c.items;
     const amount = c.amount + carry;
     carry = 0;
     const paid = take(amount, due);

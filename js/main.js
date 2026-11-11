@@ -21,7 +21,7 @@ import * as wallet from './views/wallet.js';
 import * as settings from './views/settings.js';
 import { app } from './state.js';
 
-app.version = '1.7.1';
+app.version = '1.7.2';
 const VIEWS = { inicio: dashboard, diario: diary, planejar: plan, carteira: wallet, ajustes: settings };
 const NAV = [
   ['inicio', 'Início', 'home'],
